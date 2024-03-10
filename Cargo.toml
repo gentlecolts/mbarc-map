@@ -8,6 +8,7 @@ description="Implementation of a Minimally-blocking, Atomic Reference Counted Ma
 repository = "https://github.com/gentlecolts/mbarc-map"
 readme = "README.md"
 categories =["algorithms","concurrency","data-structures","game-development"]
+keywords = ["map","hashmap","thread-safe","mutex"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
