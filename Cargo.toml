@@ -1,7 +1,13 @@
 [package]
-name = "nbarc-map"
-version = "0.1.0"
+name = "mbarc-map"
+version = "0.8.0"
 edition = "2021"
+rust-version="1.66.1"
+license="MIT"
+description="Implementation of a Minimally-blocking, Atomic Reference Counted Map"
+repository = "https://github.com/gentlecolts/mbarc-map"
+readme = "README.md"
+categories =["algorithms","concurrency","data-structures","game-development"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

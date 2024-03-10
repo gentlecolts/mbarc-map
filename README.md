@@ -1,2 +1,2 @@
-# nbarc-map
-Non-blocking, Atomic Reference Counted Map
+# mbarc-map
+Minimally-blocking, Atomic Reference Counted Map

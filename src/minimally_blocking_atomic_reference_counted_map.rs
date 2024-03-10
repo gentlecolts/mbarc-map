@@ -38,18 +38,18 @@ impl<T> DataHolder<T> {
 	}
 }
 
-/// Atomic, reference counted pointer to data stored within an [NbarcMap].
+/// Atomic, reference counted pointer to data stored within an [MbarcMap].
 ///
-/// A valid copy of DataReference should imply valid data being pointed to, regardless of the status of the owning [NbarcMap].
+/// A valid copy of DataReference should imply valid data being pointed to, regardless of the status of the owning [MbarcMap].
 ///
 /// # Examples
 /// ```
-/// //In this snippet, Arc isn't really necessary, however it's generally recommended to wrap NbarcMap in an Arc as threading is its main use case
-/// //Very important to note that you do not need to wrap NbarcMap in a Mutex, and doing so is redundant
+/// //In this snippet, Arc isn't really necessary, however it's generally recommended to wrap MbarcMap in an Arc as threading is its main use case
+/// //Very important to note that you do not need to wrap MbarcMap in a Mutex, and doing so is redundant
 /// use std::sync::{Arc, MutexGuard};
-/// use nbarc_map::{DataReference, NbarcMap};
+/// use mbarc_map::{DataReference, MbarcMap};
 ///
-/// let concurrent_map = Arc::new(NbarcMap::new());
+/// let concurrent_map = Arc::new(MbarcMap::new());
 ///
 /// let key: i64 = 2;
 /// let value: &str = "Hi";
@@ -86,7 +86,7 @@ impl<T> DataReference<T> {
 
 	/// Has the individual element been marked as deleted?
 	///
-	/// If this is true, that means this element has been removed from the owning [NbarcMap].
+	/// If this is true, that means this element has been removed from the owning [MbarcMap].
 	/// The actual data won't, however, be dropped until all references are gone.
 	///
 	/// Important to note that this could change at any time, even if a lock is taken on the actual data itself.
@@ -184,21 +184,21 @@ impl<T> Drop for DataReference<T> {
 /// This map is not quite a true HashMap, implementing many non-constant (though still sub-linear) operations for managing metadata.
 /// The theory behind this approach, however, is that by keeping mutex lock duration to a minimum and everything else "fast enough", any potential performance losses elsewhere should be more than made up accounted for in practice by allowing more saturated thread usage.
 
-pub struct NbarcMap<T: Hash + Eq, U> {
+pub struct MbarcMap<T: Hash + Eq, U> {
 	//counter: AtomicUsize,
 	data: SharedDataContainerType<U>,
 	data_refs: Arc<Mutex<HashType<T, DataReference<U>>>>,
 }
 
-impl<T: Hash + Eq, U> NbarcMap<T, U> {
-	/// Create a new, empty NbarcMap
+impl<T: Hash + Eq, U> MbarcMap<T, U> {
+	/// Create a new, empty MbarcMap
 	///
 	/// # Example
 	/// ```
 	/// use std::sync::Arc;
-	/// use nbarc_map::NbarcMap;
+	/// use mbarc_map::MbarcMap;
 	///
-	/// let concurrent_map = Arc::new(NbarcMap::new());
+	/// let concurrent_map = Arc::new(MbarcMap::<u64,String>::new());
 	/// ```
 	pub fn new() -> Self {
 		Self {
@@ -281,7 +281,7 @@ impl<T: Hash + Eq, U> NbarcMap<T, U> {
 	/// Important concurrency note: This iterator will represent the state of the map at creation time.
 	/// Adding or removing elements during iteration (in this thread or others) will not have any impact on iteration order, and creation of this iterator has a cost.
 	//TODO: make all iterators generated from macro, to ensure they really are "identical"
-	pub fn iter(&self)->crate::non_blocking_atomic_reference_counted_map::Iter<DataReference<U>>{
+	pub fn iter(&self)->crate::minimally_blocking_atomic_reference_counted_map::Iter<DataReference<U>>{
 		let ref_lock=self.data_refs.lock().unwrap();
 		let mut vals =VecDeque::with_capacity(ref_lock.len());
 
@@ -295,10 +295,10 @@ impl<T: Hash + Eq, U> NbarcMap<T, U> {
 	}
 }
 
-impl<T: Hash + Eq + Clone, U> NbarcMap<T, U> {
+impl<T: Hash + Eq + Clone, U> MbarcMap<T, U> {
 	/// An iterator visiting all key-value pairs in arbitrary order, only for keys which implement Clone
 	///
-	/// Comments regarding concurrency and performance are the same as in [NbarcMap::iter]
+	/// Comments regarding concurrency and performance are the same as in [MbarcMap::iter]
 	pub fn iter_cloned_keys(&self) -> Iter<(T, DataReference<U>)> {
 		let ref_lock=self.data_refs.lock().unwrap();
 		let mut vals =VecDeque::with_capacity(ref_lock.len());
@@ -313,10 +313,10 @@ impl<T: Hash + Eq + Clone, U> NbarcMap<T, U> {
 	}
 }
 
-impl<T: Hash + Eq + Copy, U> NbarcMap<T, U> {
+impl<T: Hash + Eq + Copy, U> MbarcMap<T, U> {
 	/// An iterator visiting all key-value pairs in arbitrary order, only for keys which implement Copy
 	///
-	/// Comments regarding concurrency and performance are the same as in [NbarcMap::iter]
+	/// Comments regarding concurrency and performance are the same as in [MbarcMap::iter]
 	pub fn iter_copied_keys(&self) -> Iter<(T, DataReference<U>)> {
 		let ref_lock=self.data_refs.lock().unwrap();
 		let mut vals =VecDeque::with_capacity(ref_lock.len());
@@ -331,7 +331,7 @@ impl<T: Hash + Eq + Copy, U> NbarcMap<T, U> {
 	}
 }
 
-impl<T: Hash + Eq, U> Drop for NbarcMap<T, U>  {
+impl<T: Hash + Eq, U> Drop for MbarcMap<T, U>  {
 	fn drop(&mut self) {
 		let ref_lock =self.data_refs.lock().unwrap();
 
@@ -341,12 +341,12 @@ impl<T: Hash + Eq, U> Drop for NbarcMap<T, U>  {
 	}
 }
 
-/// An iterator over the entries of a `NbarcMap`.
+/// An iterator over the entries of a `MbarcMap`.
 ///
-/// This `struct` is created by the various [`iter`] methods on [`NbarcMap`]. See its
+/// This `struct` is created by the various [`iter`] methods on [`MbarcMap`]. See its
 /// documentation for more.
 ///
-/// [`iter`]: NbarcMap::iter
+/// [`iter`]: MbarcMap::iter
 //TODO: iterator should lock refs and make a copy, then iterate over that copy, allowing for the map itself to be altered during iteration
 pub struct Iter<U>{
 	items:VecDeque<U>

@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/nbarc-map.iml" filepath="$PROJECT_DIR$/.idea/nbarc-map.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/mbarc-map.iml" filepath="$PROJECT_DIR$/.idea/mbarc-map.iml" />
     </modules>
   </component>
 </project>

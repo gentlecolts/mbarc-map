@@ -1,12 +1,12 @@
-//! Implementation of a [Non-blocking, Atomic Reference Counted Map](NbarcMap).
+//! Implementation of a [Minimally-blocking, Atomic Reference Counted Map](MbarcMap).
 //!
 //! To break that down, map at the heart of this crate achieves the following core goals:
-//! - Non-blocking: a user should never need to wrap this map in a mutex, all internal mutexes are held for as short of a duration as possible, and there are no deadlock cases.  Users only need to manually take locks to individual elements.
+//! - Minimally-blocking: a user should never need to wrap this map in a mutex, all internal mutexes are held for as short of a duration as possible, and there are no deadlock cases.  Users only need to manually take locks to individual elements.
 //! - Atomic Reference Counted - all data stored within the map are reference counted in a thread-safe manner, and it is safe to hold these references indefinitely
 
-pub use non_blocking_atomic_reference_counted_map::*;
+pub use minimally_blocking_atomic_reference_counted_map::*;
 
-mod non_blocking_atomic_reference_counted_map;
+mod minimally_blocking_atomic_reference_counted_map;
 mod fixed_address_continuous_allocation;
 
 #[cfg(test)]
@@ -38,7 +38,7 @@ mod tests {
 
 	#[test]
 	fn test_use_element_after_drop_one_value() {
-		let concurrent_hash = Arc::new(NbarcMap::new());
+		let concurrent_hash = Arc::new(MbarcMap::new());
 
 		let key: i64 = 2;
 		let value: &str = "Hi";
@@ -61,7 +61,7 @@ mod tests {
 		const N: usize = 1000;
 
 		let source_data = make_data_pairs::<N>(0xDEADBEEF);
-		let concurrent_hash = Arc::new(NbarcMap::new());
+		let concurrent_hash = Arc::new(MbarcMap::new());
 
 		insert_several_threaded(&source_data, &concurrent_hash);
 
@@ -87,7 +87,7 @@ mod tests {
 
 		let source_data = make_data_pairs::<N>(0xDEADBEEF);
 		let mut base_hash = Box::new(HashMap::new());
-		let concurrent_hash = Arc::new(NbarcMap::new());
+		let concurrent_hash = Arc::new(MbarcMap::new());
 
 		source_data.iter().enumerate().for_each(|(i, (k, v))| {
 			if i >= START_REMOVING_INDEX {
@@ -123,7 +123,7 @@ mod tests {
 		}
 	}
 
-	fn insert_several_threaded<const N: usize>(from: &PreSeed<N>, to: &Arc<NbarcMap<i64, i64>>) {
+	fn insert_several_threaded<const N: usize>(from: &PreSeed<N>, to: &Arc<MbarcMap<i64, i64>>) {
 		from.par_iter().for_each(|(k, v)| { to.insert(*k, *v); });
 	}
 
@@ -133,7 +133,7 @@ mod tests {
 
 		let source_data = make_data_pairs::<N>(0xDEADBEEF);
 		let mut base_hash = Box::new(HashMap::new());
-		let concurrent_hash = Arc::new(NbarcMap::new());
+		let concurrent_hash = Arc::new(MbarcMap::new());
 
 		insert_several(&source_data, &mut base_hash);
 		insert_several_threaded(&source_data, &concurrent_hash);
@@ -147,7 +147,7 @@ mod tests {
 		println!("Insert test done");
 	}
 
-	fn assert_hash_contents_equal(base_hash: &Box<HashMap<i64, i64>>, concurrent_hash: Arc<NbarcMap<i64, i64>>) {
+	fn assert_hash_contents_equal(base_hash: &Box<HashMap<i64, i64>>, concurrent_hash: Arc<MbarcMap<i64, i64>>) {
 		//println!("Comparing values after insert");
 		for (k, v) in base_hash.iter() {
 			//println!("Checking for {} and {}",k,v);
@@ -193,7 +193,7 @@ mod tests {
 
 		let source_data = make_data_pairs::<N>(0xDEADBEEF);
 		let mut base_hash = Box::new(HashMap::new());
-		let concurrent_hash = Arc::new(NbarcMap::new());
+		let concurrent_hash = Arc::new(MbarcMap::new());
 
 		insert_several(&source_data, &mut base_hash);
 		insert_several_threaded(&source_data, &concurrent_hash);
@@ -214,7 +214,7 @@ mod tests {
 		const N: usize = 100000;
 
 		let source_data = make_data_pairs::<N>(0xDEADBEEF);
-		let concurrent_hash = Arc::new(NbarcMap::new());
+		let concurrent_hash = Arc::new(MbarcMap::new());
 
 		insert_several_threaded(&source_data, &concurrent_hash);
 
