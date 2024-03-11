@@ -12,7 +12,9 @@ mod fixed_address_continuous_allocation;
 #[cfg(test)]
 mod tests {
 	use std::collections::HashMap;
-	use std::sync::{Arc, MutexGuard};
+	use std::mem::size_of;
+	use std::ops::Deref;
+	use std::sync::{Arc, Mutex, MutexGuard};
 
 	use rand::prelude::*;
 	use rand_chacha::ChaCha8Rng;
@@ -225,5 +227,35 @@ mod tests {
 			assert!(v.is_marked_deleted());
 			assert_eq!(v.ref_count(), 1);
 		}
+	}
+
+	trait TestTrait {
+		fn get(&self) -> u64 {
+			5
+		}
+	}
+
+	const TEST_TYPE_VALUE: u64 = 2;
+
+	struct TestType {}
+
+	impl TestTrait for TestType {
+		fn get(&self) -> u64 {
+			TEST_TYPE_VALUE
+		}
+	}
+
+	#[test]
+	fn mutate_deref() {
+		assert_eq!(size_of::<TestType>(), 0);
+
+		let map = MbarcMap::<usize, TestType>::new();
+		map.insert(0, TestType {});
+
+		let item = map.get(&0).unwrap();
+		assert_eq!(item.lock().unwrap().deref().get(), TEST_TYPE_VALUE);
+
+		let raw: &Mutex::<dyn TestTrait> = item.deref();
+		assert_eq!(raw.lock().unwrap().get(), TEST_TYPE_VALUE);
 	}
 }

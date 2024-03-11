@@ -3,20 +3,23 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ptr::NonNull;
-use std::sync::{Arc, atomic, Mutex};
+use std::sync::{Arc, atomic, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::fixed_address_continuous_allocation::{FaVec, FaVecIndex};
 
 type HashType<T, U> = HashMap<T, U>;
-
-//type SharedDataContainerType<T>=Arc<Mutex<HashType<usize, Box<DataHolder<T>>>>>;
 type SharedDataContainerType<T> = Arc<Mutex<FaVec<DataHolder<T>, 32>>>;
 
 struct DataHolder<T> {
 	ref_count: AtomicUsize,
-	//ref_count:Mutex<usize>,
 	pending_removal: AtomicBool,
+
+	//TODO: having these here rather than in DataReference means less duplication, but also makes for fatter entries in the FaVec array
+	//the deduplication is probably worth it, but will need to bench for it being worth the potentially less good caching behavior
+	owner: SharedDataContainerType<T>,
+	owning_key: FaVecIndex,
+
 	pub data: Mutex<T>,
 }
 
@@ -29,7 +32,6 @@ impl<T> DataHolder<T> {
 	fn ref_count(&self) -> usize {
 		//TODO: evaluate safety of this ordering
 		self.ref_count.load(Ordering::Acquire)
-		//self.ref_count.lock().unwrap().clone()
 	}
 
 	fn set_deleted(&self, state: bool) {
@@ -75,8 +77,6 @@ impl<T> DataHolder<T> {
 pub struct DataReference<T> {
 	ptr: NonNull<DataHolder<T>>,
 	phantom: PhantomData<DataHolder<T>>,
-	owner: SharedDataContainerType<T>,
-	owning_key: FaVecIndex,
 }
 
 impl<T> DataReference<T> {
@@ -102,6 +102,15 @@ impl<T> DataReference<T> {
 	pub fn ref_count(&self) -> usize {
 		self.raw_data().ref_count()
 	}
+
+	fn increment_refcount(&self) {
+		let inner = self.raw_data();
+
+		let old_rc = inner.ref_count.fetch_add(1, Ordering::Relaxed);
+		if old_rc >= isize::MAX as usize {
+			std::process::abort();
+		}
+	}
 }
 
 unsafe impl<T: Sync + Send> Send for DataReference<T> {}
@@ -118,52 +127,26 @@ impl<T> Deref for DataReference<T> {
 
 impl<T> Clone for DataReference<T> {
 	fn clone(&self) -> Self {
-		//let inner = unsafe { self.ptr.as_ref() };
-		let inner = self.raw_data();
-
-		let old_rc = inner.ref_count.fetch_add(1, Ordering::Relaxed);
-		//let mut rc_lock= inner.ref_count.lock().unwrap();
-		//let old_rc=rc_lock.clone();
-		//*rc_lock+=1;
-
-		if old_rc >= isize::MAX as usize {
-			std::process::abort();
-		}
+		self.increment_refcount();
 
 		Self {
 			ptr: self.ptr,
 			phantom: PhantomData,
-			owner: self.owner.clone(),
-			owning_key: self.owning_key,
 		}
 	}
 }
 
 impl<T> Drop for DataReference<T> {
 	fn drop(&mut self) {
-		//let inner = unsafe { self.ptr.as_ref() };
 		let inner = self.raw_data();
 
-		//*
 		if inner.ref_count.fetch_sub(1, Ordering::Release) != 1 {
 			return;
 		}
 
 		atomic::fence(Ordering::Acquire);
-		// */
 
-		/*
-		let mut rc_lock= inner.ref_count.lock().unwrap();
-		let old_rc=rc_lock.clone();
-		*rc_lock+=1;
-
-		if old_rc!=1{
-			return;
-		}
-		// */
-
-
-		self.owner.lock().unwrap().remove(&self.owning_key);
+		inner.owner.lock().unwrap().remove(&inner.owning_key);
 	}
 }
 
@@ -185,7 +168,6 @@ impl<T> Drop for DataReference<T> {
 /// The theory behind this approach, however, is that by keeping mutex lock duration to a minimum and everything else "fast enough", any potential performance losses elsewhere should be more than made up accounted for in practice by allowing more saturated thread usage.
 
 pub struct MbarcMap<T: Hash + Eq, U> {
-	//counter: AtomicUsize,
 	data: SharedDataContainerType<U>,
 	data_refs: Arc<Mutex<HashType<T, DataReference<U>>>>,
 }
@@ -202,8 +184,6 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 	/// ```
 	pub fn new() -> Self {
 		Self {
-			//counter: AtomicUsize::new(0),
-			//data: Arc::new(Mutex::new(HashType::new())),
 			data: Arc::new(Mutex::new(FaVec::new())),
 			data_refs: Arc::new(Mutex::new(HashType::new())),
 		}
@@ -217,23 +197,21 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 		let mut refs_lock = self.data_refs.lock().unwrap();
 		let mut data_lock = self.data.lock().unwrap();
 
-		//let new_key = self.counter.fetch_add(1, Ordering::Relaxed);
-
 		let new_holder = DataHolder {
 			ref_count: AtomicUsize::new(1),
-			//ref_count:Mutex::new(1),
 			pending_removal: AtomicBool::new(false),
 			data: Mutex::new(value),
+			owner: self.data.clone(),
+			owning_key: 0,
 		};
 
-		//data_lock.insert(new_key, Box::new(new_holder));
 		let new_key = data_lock.push(new_holder);
+		let inserted_item = data_lock.get_mut(&new_key).unwrap();
+		inserted_item.owning_key = new_key;
 
 		refs_lock.insert(key, DataReference {
-			ptr: NonNull::new(data_lock.get_mut(&new_key).unwrap() as *mut DataHolder<U>).unwrap(),
+			ptr: NonNull::new(inserted_item as *mut DataHolder<U>).unwrap(),
 			phantom: PhantomData,
-			owner: self.data.clone(),
-			owning_key: new_key,
 		})
 	}
 
@@ -281,16 +259,16 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 	/// Important concurrency note: This iterator will represent the state of the map at creation time.
 	/// Adding or removing elements during iteration (in this thread or others) will not have any impact on iteration order, and creation of this iterator has a cost.
 	//TODO: make all iterators generated from macro, to ensure they really are "identical"
-	pub fn iter(&self)->crate::minimally_blocking_atomic_reference_counted_map::Iter<DataReference<U>>{
-		let ref_lock=self.data_refs.lock().unwrap();
-		let mut vals =VecDeque::with_capacity(ref_lock.len());
+	pub fn iter(&self) -> crate::minimally_blocking_atomic_reference_counted_map::Iter<DataReference<U>> {
+		let ref_lock = self.data_refs.lock().unwrap();
+		let mut vals = VecDeque::with_capacity(ref_lock.len());
 
-		for value in ref_lock.values(){
+		for value in ref_lock.values() {
 			vals.push_back(value.clone());
 		}
 
-		Iter{
-			items:vals
+		Iter {
+			items: vals
 		}
 	}
 }
@@ -300,15 +278,15 @@ impl<T: Hash + Eq + Clone, U> MbarcMap<T, U> {
 	///
 	/// Comments regarding concurrency and performance are the same as in [MbarcMap::iter]
 	pub fn iter_cloned_keys(&self) -> Iter<(T, DataReference<U>)> {
-		let ref_lock=self.data_refs.lock().unwrap();
-		let mut vals =VecDeque::with_capacity(ref_lock.len());
+		let ref_lock = self.data_refs.lock().unwrap();
+		let mut vals = VecDeque::with_capacity(ref_lock.len());
 
-		for (key,value) in ref_lock.iter(){
+		for (key, value) in ref_lock.iter() {
 			vals.push_back((key.clone(), value.clone()));
 		}
 
-		Iter{
-			items:vals
+		Iter {
+			items: vals
 		}
 	}
 }
@@ -318,24 +296,24 @@ impl<T: Hash + Eq + Copy, U> MbarcMap<T, U> {
 	///
 	/// Comments regarding concurrency and performance are the same as in [MbarcMap::iter]
 	pub fn iter_copied_keys(&self) -> Iter<(T, DataReference<U>)> {
-		let ref_lock=self.data_refs.lock().unwrap();
-		let mut vals =VecDeque::with_capacity(ref_lock.len());
+		let ref_lock = self.data_refs.lock().unwrap();
+		let mut vals = VecDeque::with_capacity(ref_lock.len());
 
-		for (key,value) in ref_lock.iter(){
+		for (key, value) in ref_lock.iter() {
 			vals.push_back((*key, value.clone()));
 		}
 
-		Iter{
-			items:vals
+		Iter {
+			items: vals
 		}
 	}
 }
 
-impl<T: Hash + Eq, U> Drop for MbarcMap<T, U>  {
+impl<T: Hash + Eq, U> Drop for MbarcMap<T, U> {
 	fn drop(&mut self) {
-		let ref_lock =self.data_refs.lock().unwrap();
+		let ref_lock = self.data_refs.lock().unwrap();
 
-		for value in ref_lock.values(){
+		for value in ref_lock.values() {
 			value.raw_data().set_deleted(true);
 		}
 	}
@@ -347,9 +325,8 @@ impl<T: Hash + Eq, U> Drop for MbarcMap<T, U>  {
 /// documentation for more.
 ///
 /// [`iter`]: MbarcMap::iter
-//TODO: iterator should lock refs and make a copy, then iterate over that copy, allowing for the map itself to be altered during iteration
-pub struct Iter<U>{
-	items:VecDeque<U>
+pub struct Iter<U> {
+	items: VecDeque<U>,
 }
 
 impl<U> Iterator for Iter<U> {
@@ -359,3 +336,4 @@ impl<U> Iterator for Iter<U> {
 		self.items.pop_front()
 	}
 }
+
