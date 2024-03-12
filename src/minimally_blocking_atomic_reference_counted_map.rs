@@ -319,6 +319,18 @@ impl<T: Hash + Eq, U> Drop for MbarcMap<T, U> {
 	}
 }
 
+impl<K, V, const N: usize> From<[(K, V); N]> for MbarcMap<K, V> where K: Eq + Hash{
+	fn from(arr: [(K, V); N]) -> Self{
+		let map=Self::new();
+
+		for (k,v) in arr{
+			map.insert(k,v);
+		}
+
+		map
+	}
+}
+
 /// An iterator over the entries of a `MbarcMap`.
 ///
 /// This `struct` is created by the various [`iter`] methods on [`MbarcMap`]. See its
