@@ -271,6 +271,18 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 			items: vals
 		}
 	}
+
+	/// Exclusive lock on the map for iteration.  This does not clone any elements, therefore requiring a lock is taken on the map.
+	/// This returns a [LockedContainer], which only provides an iter() function, returning the iterator you want.
+	///
+	/// Usage: given some `my_hash: MbarcMap<T,U>`, lock and iterate over it via
+	///
+	/// `for (k,v) in my_hash.iter_exclusive().iter()`
+	pub fn iter_exclusive(&self) -> LockedContainer<'_, T, U> {
+		LockedContainer {
+			items: self.data_refs.lock().unwrap(),
+		}
+	}
 }
 
 impl<T: Hash + Eq + Clone, U> MbarcMap<T, U> {
@@ -319,12 +331,12 @@ impl<T: Hash + Eq, U> Drop for MbarcMap<T, U> {
 	}
 }
 
-impl<K, V, const N: usize> From<[(K, V); N]> for MbarcMap<K, V> where K: Eq + Hash{
-	fn from(arr: [(K, V); N]) -> Self{
-		let map=Self::new();
+impl<K, V, const N: usize> From<[(K, V); N]> for MbarcMap<K, V> where K: Eq + Hash {
+	fn from(arr: [(K, V); N]) -> Self {
+		let map = Self::new();
 
-		for (k,v) in arr{
-			map.insert(k,v);
+		for (k, v) in arr {
+			map.insert(k, v);
 		}
 
 		map
@@ -349,3 +361,16 @@ impl<U> Iterator for Iter<U> {
 	}
 }
 
+/// Represents a lock to an [MbarcMap]'s internal map, used exclusively for locked, by-reference iteration
+/// see [`iter_exclusive`]
+///
+/// [`iter_exclusive`]: MbarcMap::iter_exclusive
+pub struct LockedContainer<'a, T, U> {
+	items: MutexGuard<'a, HashType<T, DataReference<U>>>,
+}
+
+impl<'a, T, U> LockedContainer<'a, T, U> {
+	pub fn iter(&self) -> impl Iterator<Item=(&T, &DataReference<U>)> {
+		self.items.iter()
+	}
+}

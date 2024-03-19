@@ -15,6 +15,7 @@ mod tests {
 	use std::mem::size_of;
 	use std::ops::Deref;
 	use std::sync::{Arc, Mutex, MutexGuard};
+	use std::thread;
 
 	use rand::prelude::*;
 	use rand_chacha::ChaCha8Rng;
@@ -23,6 +24,8 @@ mod tests {
 	use super::*;
 
 	type PreSeed<const N: usize> = Box<[(i64, i64); N]>;
+
+	const FIXED_SEED: u64 = 0xDEADBEEF;
 
 	fn make_data_pairs<const N: usize>(seed: u64) -> PreSeed<N> {
 		let mut rng = ChaCha8Rng::seed_from_u64(seed);
@@ -59,10 +62,10 @@ mod tests {
 	}
 
 	#[test]
-	fn safe_to_use_element_after_map_is_dropped() {
+	fn test_safe_to_use_element_after_map_is_dropped() {
 		const N: usize = 1000;
 
-		let source_data = make_data_pairs::<N>(0xDEADBEEF);
+		let source_data = make_data_pairs::<N>(FIXED_SEED);
 		let concurrent_hash = Arc::new(MbarcMap::new());
 
 		insert_several_threaded(&source_data, &concurrent_hash);
@@ -87,7 +90,7 @@ mod tests {
 		const START_REMOVING_INDEX: usize = 2 * STEP_SIZE;
 		const N: usize = 3 * STEP_SIZE;
 
-		let source_data = make_data_pairs::<N>(0xDEADBEEF);
+		let source_data = make_data_pairs::<N>(FIXED_SEED);
 		let mut base_hash = Box::new(HashMap::new());
 		let concurrent_hash = Arc::new(MbarcMap::new());
 
@@ -133,7 +136,7 @@ mod tests {
 	fn test_insert_only() {
 		const N: usize = 100000;
 
-		let source_data = make_data_pairs::<N>(0xDEADBEEF);
+		let source_data = make_data_pairs::<N>(FIXED_SEED);
 		let mut base_hash = Box::new(HashMap::new());
 		let concurrent_hash = Arc::new(MbarcMap::new());
 
@@ -193,7 +196,7 @@ mod tests {
 	fn test_iterator() {
 		const N: usize = 100000;
 
-		let source_data = make_data_pairs::<N>(0xDEADBEEF);
+		let source_data = make_data_pairs::<N>(FIXED_SEED);
 		let mut base_hash = Box::new(HashMap::new());
 		let concurrent_hash = Arc::new(MbarcMap::new());
 
@@ -215,7 +218,7 @@ mod tests {
 	fn test_drop() {
 		const N: usize = 100000;
 
-		let source_data = make_data_pairs::<N>(0xDEADBEEF);
+		let source_data = make_data_pairs::<N>(FIXED_SEED);
 		let concurrent_hash = Arc::new(MbarcMap::new());
 
 		insert_several_threaded(&source_data, &concurrent_hash);
@@ -246,7 +249,7 @@ mod tests {
 	}
 
 	#[test]
-	fn mutate_deref() {
+	fn test_mutate_deref() {
 		assert_eq!(size_of::<TestType>(), 0);
 
 		let map = MbarcMap::<usize, TestType>::new();
@@ -257,5 +260,53 @@ mod tests {
 
 		let raw: &Mutex::<dyn TestTrait> = item.deref();
 		assert_eq!(raw.lock().unwrap().get(), TEST_TYPE_VALUE);
+	}
+
+	#[test]
+	fn test_locked_iteration() {
+		const N: usize = 1000;
+
+		let source_data = make_data_pairs::<N>(FIXED_SEED);
+		let concurrent_hash = Arc::new(MbarcMap::new());
+
+		insert_several_threaded(&source_data, &concurrent_hash);
+
+		let result=thread::scope(|scope|{
+			let v:Arc<Mutex<Vec<(i64,DataReference<i64>)>>>=Default::default();
+
+			for _ in 0..2{
+				let my_hash=concurrent_hash.clone();
+				let my_vec=v.clone();
+				scope.spawn(move ||{
+					for (k, v) in my_hash.iter_exclusive().iter(){
+						my_vec.lock().unwrap().push((*k,v.clone()))
+					}
+				});
+			}
+
+			v
+		});
+
+		let result=match Arc::try_unwrap(result){
+			Ok(r) => {
+				r.into_inner().unwrap()
+			}
+			Err(_) => {
+				unreachable!()
+			}
+		};
+
+		assert_eq!(result.len(),2*N);
+
+		for i in 0..N{
+			let (k1,v1)=&result[i];
+			let (k2,v2)=&result[i+N];
+
+			assert_eq!(*k1,*k2);
+
+			let v1=*v1.lock().unwrap();
+			let v2=*v2.lock().unwrap();
+			assert_eq!(v1,v2);
+		}
 	}
 }
