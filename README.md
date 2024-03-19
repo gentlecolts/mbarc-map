@@ -11,7 +11,7 @@ Minimally-blocking, Atomic Reference Counted Map
 
 [API Docs](https://docs.rs/mbarc-map/latest/mbarc_map/)
 
-The motivation of the map implemented in this crate is to provide a map that is better suited towards concurrent use.  This, in particular, attempts to solve two particular problems:
+The motivation of the map implemented in this crate is to provide a map that is better suited towards concurrent use.  This crate attempts to solve two problems:
 - Need to be able to refer to map elements without keeping the map itself locked
 - Data stored within the map should be stored in a way that is as cache-friendly as possible for efficient iteration
 
