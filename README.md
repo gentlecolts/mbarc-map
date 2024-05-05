@@ -16,4 +16,4 @@ The motivation of the map implemented in this crate is to provide a map that is 
 - Data stored within the map should be stored in a way that is as cache-friendly as possible for efficient iteration
 
 Individually, these aren't huge asks, but achieving both of these properties while satisfying rust ended up being complex enough to be worth wrapping, thus leading to the creation of MbarcMap.
-You can kind of think of `MbarcMap<T,U>` as a shorthand for: `Mutex<HashMap<T,Arc<Mutex<U>>>>`, however there's more to it than that, especially in regards to pointer safety (stored values are never moved), memory layout (data is stored in continuous blocks), and iterators (safe to alter the map while iterating over it)
+You can kind of think of `MbarcMap<T,U>` as a shorthand for: `Mutex<HashMap<T,Arc<Mutex<U>>>>`, however there's more to it than that, especially in regard to pointer safety (stored values are never moved), memory layout (data is stored in continuous blocks), and iterators (safe to alter the map while iterating over it)

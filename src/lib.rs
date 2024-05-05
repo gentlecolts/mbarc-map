@@ -43,16 +43,16 @@ mod tests {
 
 	#[test]
 	fn test_use_element_after_drop_one_value() {
-		let concurrent_hash = Arc::new(MbarcMap::new());
+		let concurrent_hash = Arc::new(MbarcMap::<i64, &str>::new());
 
 		let key: i64 = 2;
 		let value: &str = "Hi";
 		concurrent_hash.insert(key, value);
 
-		let first_value: Option<DataReference<&str>> = concurrent_hash.get(&key);
+		let first_value = concurrent_hash.get(&key);
 		drop(concurrent_hash);
 
-		let first_value: DataReference<&str> = first_value.unwrap();
+		let first_value = first_value.unwrap();
 
 		assert_eq!(first_value.ref_count(), 1);
 		assert!(first_value.is_marked_deleted());
@@ -267,19 +267,19 @@ mod tests {
 		const N: usize = 1000;
 
 		let source_data = make_data_pairs::<N>(FIXED_SEED);
-		let concurrent_hash = Arc::new(MbarcMap::new());
+		let concurrent_hash = Arc::new(MbarcMap::<i64, i64, 32>::new());
 
 		insert_several_threaded(&source_data, &concurrent_hash);
 
-		let result=thread::scope(|scope|{
-			let v:Arc<Mutex<Vec<(i64,DataReference<i64>)>>>=Default::default();
+		let result = thread::scope(|scope| {
+			let v: Arc<Mutex<Vec<(i64, DataReference<i64, 32>)>>> = Default::default();
 
-			for _ in 0..2{
-				let my_hash=concurrent_hash.clone();
-				let my_vec=v.clone();
-				scope.spawn(move ||{
-					for (k, v) in my_hash.iter_exclusive().iter(){
-						my_vec.lock().unwrap().push((*k,v.clone()))
+			for _ in 0..2 {
+				let my_hash = concurrent_hash.clone();
+				let my_vec = v.clone();
+				scope.spawn(move || {
+					for (k, v) in my_hash.iter_exclusive().iter() {
+						my_vec.lock().unwrap().push((*k, v.clone()))
 					}
 				});
 			}
@@ -287,7 +287,7 @@ mod tests {
 			v
 		});
 
-		let result=match Arc::try_unwrap(result){
+		let result = match Arc::try_unwrap(result) {
 			Ok(r) => {
 				r.into_inner().unwrap()
 			}
@@ -296,17 +296,17 @@ mod tests {
 			}
 		};
 
-		assert_eq!(result.len(),2*N);
+		assert_eq!(result.len(), 2 * N);
 
-		for i in 0..N{
-			let (k1,v1)=&result[i];
-			let (k2,v2)=&result[i+N];
+		for i in 0..N {
+			let (k1, v1) = &result[i];
+			let (k2, v2) = &result[i + N];
 
-			assert_eq!(*k1,*k2);
+			assert_eq!(*k1, *k2);
 
-			let v1=*v1.lock().unwrap();
-			let v2=*v2.lock().unwrap();
-			assert_eq!(v1,v2);
+			let v1 = *v1.lock().unwrap();
+			let v2 = *v2.lock().unwrap();
+			assert_eq!(v1, v2);
 		}
 	}
 }
