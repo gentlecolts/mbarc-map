@@ -25,6 +25,10 @@ opt-level = 3
 opt-level = 3
 debug = true
 
+[profile.test]
+opt-level = 3
+debug = true
+
 [dependencies]
 
 [dev-dependencies]

@@ -38,8 +38,8 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 	//max for offset is blocksize-1
 	// block*blocksize+blocksize-1 <= usize::max - 1
 	//block*(blocksize+1) <= usize::max
-	//block <= usize / (blocksize+1)
-	//if block = usize/(blocksize+1) and we are full, push should panic instead of adding new data
+	//block <= usize::max / (blocksize+1)
+	//if block = usize::max/(blocksize+1) and we are full, push should panic instead of adding new data
 	const MAX_BLOCK_COUNT: usize = usize::MAX / (BLOCK_SIZE + 1);
 
 	pub fn new() -> Self {
