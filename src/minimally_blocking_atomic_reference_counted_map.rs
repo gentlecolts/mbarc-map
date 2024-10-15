@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -24,8 +25,8 @@ struct DataHolder<T> {
 }
 
 impl<T> DataHolder<T> {
-	//TODO: evaluate safety of this ordering
 	fn deleted(&self) -> bool {
+		//TODO: evaluate safety of this ordering
 		self.pending_removal.load(Ordering::Acquire)
 	}
 
@@ -111,10 +112,21 @@ impl<T> DataReference<T> {
 			std::process::abort();
 		}
 	}
+
+	fn drop_impl(raw_ptr: NonNull<u8>){
+		let inner = unsafe { raw_ptr.cast::<DataHolder<T>>().as_ref() };
+
+		if inner.ref_count.fetch_sub(1, Ordering::Release) != 1 {
+			return;
+		}
+
+		atomic::fence(Ordering::Acquire);
+
+		inner.owner.lock().unwrap().remove(&inner.owning_key);
+	}
 }
 
 unsafe impl<T: Sync + Send> Send for DataReference<T> {}
-
 unsafe impl<T: Sync + Send> Sync for DataReference<T> {}
 
 impl<T> Deref for DataReference<T> {
@@ -138,15 +150,71 @@ impl<T> Clone for DataReference<T> {
 
 impl<T> Drop for DataReference<T> {
 	fn drop(&mut self) {
-		let inner = self.raw_data();
+		DataReference::<T>::drop_impl(self.ptr.cast::<u8>());
+	}
+}
 
-		if inner.ref_count.fetch_sub(1, Ordering::Release) != 1 {
-			return;
+
+/// A Genericized version of [DataReference]\<T\>
+/// 
+/// This type can be safely passed around without knowing the inner <T> of a [DataReference].  [DataReferenceGeneric] will track ref count just as [DataReference], however the innner data <T> cannot be accessed without first converting back into [DataReference]\<T\>.
+/// 
+/// Implements [From<DataReference<T>>]
+pub struct DataReferenceGeneric{
+	ptr: NonNull<u8>,
+	type_id: TypeId,
+	inner_type_id: TypeId,
+	drop_fn: &'static dyn Fn(NonNull<u8>),
+}
+
+impl DataReferenceGeneric{
+	/// The [TypeId] of the associated [DataReference]\<T\>, literally `TypeId::of::<DataReference<T>>()`
+	pub fn type_id(&self)->TypeId{
+		self.type_id
+	}
+	/// The [TypeId] of the inner type T of the associated [DataReference]\<T\>.  If this [DataReferenceGeneric] is associated with [DataReference]\<T\>, this would be the result of `TypeId::of::<T>()`
+	pub fn inner_type_id(&self)->TypeId{
+		self.inner_type_id
+	}
+
+	/// For a given type T, create a [DataReference]\<T\> if and only if T matches the type that was used to create this [DataReferenceGeneric], otherwise None
+	/// 
+	/// This increments the ref count if Some is returned
+	pub fn to_typed<T: 'static>(&self) -> Option<DataReference<T>>{
+		if TypeId::of::<DataReference<T>>() == self.type_id{
+			let tmp=DataReference::<T>{
+				ptr: self.ptr.cast::<DataHolder<T>>(),
+				phantom: PhantomData,
+			};
+
+			tmp.increment_refcount();
+
+			Some(tmp)
+		} else {
+			None
 		}
+	}
+}
 
-		atomic::fence(Ordering::Acquire);
+unsafe impl Send for DataReferenceGeneric {}
+unsafe impl Sync for DataReferenceGeneric {}
 
-		inner.owner.lock().unwrap().remove(&inner.owning_key);
+impl<T: 'static> From<DataReference<T>> for DataReferenceGeneric{
+	fn from(source: DataReference<T>) -> Self{
+		source.increment_refcount();
+
+		Self{
+			ptr: source.ptr.cast::<u8>(),
+			type_id: TypeId::of::<DataReference<T>>(),
+			inner_type_id: TypeId::of::<T>(),
+			drop_fn: &DataReference::<T>::drop_impl,
+		}
+	}
+}
+
+impl Drop for DataReferenceGeneric {
+	fn drop(&mut self) {
+		(self.drop_fn)(self.ptr.cast::<u8>());
 	}
 }
 
@@ -258,7 +326,7 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 	///
 	/// Important concurrency note: This iterator will represent the state of the map at creation time.
 	/// Adding or removing elements during iteration (in this thread or others) will not have any impact on iteration order, and creation of this iterator has a cost.
-	//TODO: make all iterators generated from macro, to ensure they really are "identical"
+	//TODO: make all iterators generated from macro, to ensure they really are "identical" (????)
 	pub fn iter(&self) -> crate::minimally_blocking_atomic_reference_counted_map::Iter<DataReference<U>> {
 		let ref_lock = self.data_refs.lock().unwrap();
 		let mut vals = VecDeque::with_capacity(ref_lock.len());
@@ -320,6 +388,9 @@ impl<T: Hash + Eq + Copy, U> MbarcMap<T, U> {
 		}
 	}
 }
+
+unsafe impl<T: Hash + Eq,U> Send for MbarcMap<T, U> {}
+unsafe impl<T: Hash + Eq,U> Sync for MbarcMap<T, U> {}
 
 impl<T: Hash + Eq, U> Drop for MbarcMap<T, U> {
 	fn drop(&mut self) {

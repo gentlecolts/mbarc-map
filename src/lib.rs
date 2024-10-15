@@ -11,6 +11,7 @@ mod fixed_address_continuous_allocation;
 
 #[cfg(test)]
 mod tests {
+	use std::any::TypeId;
 	use std::collections::HashMap;
 	use std::mem::size_of;
 	use std::ops::Deref;
@@ -308,5 +309,153 @@ mod tests {
 			let v2=*v2.lock().unwrap();
 			assert_eq!(v1,v2);
 		}
+	}
+
+	struct GenericRefTestType{
+		a: MbarcMap<usize,u32>,
+		b: MbarcMap<usize,u64>,
+	}
+
+	impl GenericRefTestType{
+		const A_ITEM_KEY: usize=0;
+		const B_ITEM_KEY: usize=0;
+
+		fn new(a_val:u32,b_val:u64)->Self{
+			let a=MbarcMap::new();
+			let b=MbarcMap::new();
+
+			a.insert(Self::A_ITEM_KEY, a_val);
+			b.insert(Self::B_ITEM_KEY, b_val);
+
+			Self{a,b}
+		}
+
+		fn get_from_a(&self)->DataReferenceGeneric{
+			DataReferenceGeneric::from(self.a.get(&Self::A_ITEM_KEY).unwrap())
+		}
+
+		fn get_from_b(&self)->DataReferenceGeneric{
+			DataReferenceGeneric::from(self.b.get(&Self::B_ITEM_KEY).unwrap())
+		}
+
+		fn a_ref_count(&self)->usize{
+			//numder of refs, minus the temporary one we just created
+			self.a.get(&Self::A_ITEM_KEY).unwrap().ref_count() - 1
+		}
+
+		fn b_ref_count(&self)->usize{
+			//numder of refs, minus the temporary one we just created
+			self.b.get(&Self::B_ITEM_KEY).unwrap().ref_count() - 1
+		}
+
+		fn set_a(&self,value: u32){
+			*self.a.get(&Self::A_ITEM_KEY).unwrap().lock().unwrap()=value;
+		}
+
+		fn set_b(&self,value: u64){
+			*self.b.get(&Self::B_ITEM_KEY).unwrap().lock().unwrap()=value;
+		}
+	}
+
+	#[test]
+	fn test_generic_morphing(){
+		const A_VALUE:u32=0;
+		const B_VALUE:u64=0;
+
+		let tester=GenericRefTestType::new(A_VALUE,B_VALUE);
+
+		assert_eq!(tester.a_ref_count(),1);
+		assert_eq!(tester.b_ref_count(),1);
+
+		let a_generic=tester.get_from_a();
+		let b_generic=tester.get_from_b();
+
+		assert_eq!(tester.a_ref_count(),2);
+		assert_eq!(tester.b_ref_count(),2);
+
+		assert_eq!(a_generic.type_id(),TypeId::of::<DataReference<u32>>());
+		assert_eq!(a_generic.inner_type_id(),TypeId::of::<u32>());
+
+		assert_eq!(b_generic.type_id(),TypeId::of::<DataReference<u64>>());
+		assert_eq!(b_generic.inner_type_id(),TypeId::of::<u64>());
+
+		let not_a=a_generic.to_typed::<u128>();
+		let not_b=b_generic.to_typed::<u128>();
+
+		assert!(not_a.is_none());
+		assert!(not_b.is_none());
+
+		assert_eq!(tester.a_ref_count(),2);
+		assert_eq!(tester.b_ref_count(),2);
+
+		let actually_a=a_generic.to_typed::<u32>();
+		let actually_b=b_generic.to_typed::<u64>();
+
+		assert!(actually_a.is_some());
+		assert!(actually_b.is_some());
+
+		assert_eq!(tester.a_ref_count(),3);
+		assert_eq!(tester.b_ref_count(),3);
+
+		drop(a_generic);
+		assert_eq!(tester.a_ref_count(),2);
+
+		drop(b_generic);
+		assert_eq!(tester.b_ref_count(),2);
+
+		let actually_a=actually_a.unwrap();
+		let actually_b=actually_b.unwrap();
+
+		assert_eq!(*actually_a.lock().unwrap(),A_VALUE);
+		assert_eq!(*actually_b.lock().unwrap(),B_VALUE);
+
+		const NEW_A: u32=11;
+		const NEW_B: u64=12;
+
+		tester.set_a(NEW_A);
+		tester.set_b(NEW_B);
+
+		assert_eq!(*actually_a.lock().unwrap(),NEW_A);
+		assert_eq!(*actually_b.lock().unwrap(),NEW_B);
+	}
+
+	#[test]
+	fn test_generic_early_drop(){
+		const A_VALUE:u32=0;
+		const B_VALUE:u64=0;
+
+		let tester=GenericRefTestType::new(A_VALUE,B_VALUE);
+
+		assert_eq!(tester.a_ref_count(),1);
+		assert_eq!(tester.b_ref_count(),1);
+
+		let a_generic=tester.get_from_a();
+		let b_generic=tester.get_from_b();
+
+		assert_eq!(tester.a_ref_count(),2);
+		assert_eq!(tester.b_ref_count(),2);
+
+		drop(tester);
+
+		let actually_a=a_generic.to_typed::<u32>();
+		let actually_b=b_generic.to_typed::<u64>();
+
+		assert!(actually_a.is_some());
+		assert!(actually_b.is_some());
+
+		let actually_a=actually_a.unwrap();
+		let actually_b=actually_b.unwrap();
+
+		assert_eq!(actually_a.ref_count(),2);
+		assert_eq!(actually_b.ref_count(),2);
+
+		drop(a_generic);
+		assert_eq!(actually_a.ref_count(),1);
+
+		drop(b_generic);
+		assert_eq!(actually_b.ref_count(),1);
+
+		assert_eq!(*actually_a.lock().unwrap(),A_VALUE);
+		assert_eq!(*actually_b.lock().unwrap(),B_VALUE);
 	}
 }
