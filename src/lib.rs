@@ -4,10 +4,19 @@
 //! - Minimally-blocking: a user should never need to wrap this map in a mutex, all internal mutexes are held for as short of a duration as possible, and there are no deadlock cases.  Users only need to manually take locks to individual elements.
 //! - Atomic Reference Counted - all data stored within the map are reference counted in a thread-safe manner, and it is safe to hold these references indefinitely
 
+pub use fixed_address_continuous_allocation::*;
+
+pub use data_reference::*;
+pub use data_reference_generic::*;
 pub use minimally_blocking_atomic_reference_counted_map::*;
 
-mod minimally_blocking_atomic_reference_counted_map;
 mod fixed_address_continuous_allocation;
+
+mod data_holder;
+mod data_reference;
+mod data_reference_generic;
+
+mod minimally_blocking_atomic_reference_counted_map;
 
 #[cfg(test)]
 mod tests {
@@ -17,7 +26,6 @@ mod tests {
 	use std::ops::Deref;
 	use std::sync::{Arc, Mutex, MutexGuard};
 	use std::thread;
-
 	use rand::prelude::*;
 	use rand_chacha::ChaCha8Rng;
 	use rayon::prelude::*;

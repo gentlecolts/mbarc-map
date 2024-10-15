@@ -27,6 +27,8 @@ pub struct FaVecIndex {
 pub type FaVecIndex = usize;
 
 pub struct FaVec<T, const BLOCK_SIZE: usize> {
+	//TODO: we use Box to keep data_blocks small and allow efficient resize, however we also only add to/remove from data_blocks at the end index.
+	//TODO: Determine if it's most efficient to a) keep as-is, b) remove the Box, or c) remove empty blocks from the middle as well
 	data_blocks: Vec<Box<DataBlock<T, BLOCK_SIZE>>>,
 
 	//maps free space to a set of indexes (in data)
@@ -318,6 +320,8 @@ mod tests {
 
 	use crate::fixed_address_continuous_allocation::{FaVec, FaVecIndex};
 
+	const TEST_BLOCK_SIZE: usize = 512;
+
 	#[test]
 	fn fa_vec_properties_test_random_io() {
 		//randomly add and remove elements in a 2:1 ratio until data reaches a certain count
@@ -325,7 +329,7 @@ mod tests {
 		const ITEM_COUNT: usize = 100000;
 
 		let mut rng = ChaCha8Rng::seed_from_u64(0xDEADBEEF);
-		let mut vec = FaVec::<i64, 512>::new();
+		let mut vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
 		let mut keys = Vec::<FaVecIndex>::new();
 
 		//note, this access pattern is pretty basic, as it is very unlikely to leave holes in the vec
@@ -357,13 +361,19 @@ mod tests {
 		const ITEM_COUNT: usize = 100000;
 
 		let mut rng = ChaCha8Rng::seed_from_u64(0xDEADBEEF);
-		let mut vec = FaVec::<i64, 512>::new();
+		let mut vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
 		let mut keys = Vec::<FaVecIndex>::new();
 
-		for _ in 0..2 * ITEM_COUNT {
+		let mut total_items:usize=0;
+
+		const INITIAL_ITEM_COUNT: usize = ITEM_COUNT * 2;
+		for _ in 0..INITIAL_ITEM_COUNT {
 			let new_value = rng.gen::<i64>();
 			let new_key = vec.push(new_value);
 			keys.push(new_key);
+
+			assert_eq!(vec.capacity(), TEST_BLOCK_SIZE*(1 + total_items/TEST_BLOCK_SIZE));
+			total_items += 1;
 		}
 
 		const HALF_ITEM_COUNT: usize = ITEM_COUNT / 2;
@@ -371,6 +381,8 @@ mod tests {
 			let key_index = rng.gen_range(0..keys.len());
 			let key = keys.swap_remove(key_index);
 			vec.remove(&key);
+
+			//TODO: it's impossible to assess capacity in-loop, due to the random remove order.  Adjust/implement test(s) to account for this
 		}
 
 		for _ in 0..HALF_ITEM_COUNT {
@@ -393,7 +405,7 @@ mod tests {
 		const ITEM_COUNT: usize = 100000;
 
 		let mut rng = ChaCha8Rng::seed_from_u64(0xDEADBEEF);
-		let mut vec = FaVec::<i64, 512>::new();
+		let mut vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
 		let mut keys = Vec::<FaVecIndex>::new();
 
 		for _ in 0..2 * ITEM_COUNT {
@@ -434,7 +446,7 @@ mod tests {
 		validate_vec_properties(&mut vec);
 	}
 
-	fn validate_vec_properties(vec: &mut FaVec<i64, 512>) {
+	fn validate_vec_properties(vec: &mut FaVec<i64, TEST_BLOCK_SIZE>) {
 		//assert that actual data matches free_space
 		//assert that free space map matches free_space
 		//statistically, most blocks should be pretty full, or pretty empty
