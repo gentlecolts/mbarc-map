@@ -28,8 +28,8 @@ impl<T> DataHolder<T> {
 		self.ref_count.load(Ordering::Acquire)
 	}
 
-	pub(crate) fn set_deleted(&self, state: bool) {
+	pub(crate) fn set_deleted(&self) {
 		//TODO: evaluate safety of this ordering
-		self.pending_removal.store(state, Ordering::Release);
+		self.pending_removal.store(true, Ordering::Release);
 	}
 }

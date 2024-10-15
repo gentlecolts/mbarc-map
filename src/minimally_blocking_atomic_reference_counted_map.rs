@@ -103,7 +103,7 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 	pub fn remove(&self, key: &T) -> Option<DataReference<U>> {
 		match self.data_refs.lock().unwrap().remove(key) {
 			Some(value_ref) => {
-				value_ref.raw_data().set_deleted(true);
+				value_ref.raw_data().set_deleted();
 				Some(value_ref)
 			}
 			None => None
@@ -190,7 +190,7 @@ impl<T: Hash + Eq, U> Drop for MbarcMap<T, U> {
 		let ref_lock = self.data_refs.lock().unwrap();
 
 		for value in ref_lock.values() {
-			value.raw_data().set_deleted(true);
+			value.raw_data().set_deleted();
 		}
 	}
 }
