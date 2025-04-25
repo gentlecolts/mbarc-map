@@ -41,8 +41,8 @@ mod tests {
 
 		let mut pairs = Box::new([(0i64, 0i64); N]);
 		for i in 0..N {
-			let a = rng.gen_range(i64::MIN..i64::MAX);
-			let b = rng.gen_range(i64::MIN..i64::MAX);
+			let a = rng.random_range(i64::MIN..i64::MAX);
+			let b = rng.random_range(i64::MIN..i64::MAX);
 			pairs[i] = (a, b);
 		}
 
