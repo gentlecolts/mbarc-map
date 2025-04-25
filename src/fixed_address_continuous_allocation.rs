@@ -334,14 +334,14 @@ mod tests {
 
 		//note, this access pattern is pretty basic, as it is very unlikely to leave holes in the vec
 		while keys.len() < ITEM_COUNT {
-			let remove_element = rng.gen_ratio(1, 3);
+			let remove_element = rng.random_ratio(1, 3);
 
 			if remove_element && keys.len() > 0 {
-				let key_index = rng.gen_range(0..keys.len());
+				let key_index = rng.random_range(0..keys.len());
 				let key = keys.swap_remove(key_index);
 				vec.remove(&key);
 			} else {
-				let new_value = rng.gen::<i64>();
+				let new_value = rng.random::<i64>();
 				let new_key = vec.push(new_value);
 				keys.push(new_key);
 			}
@@ -368,7 +368,7 @@ mod tests {
 
 		const INITIAL_ITEM_COUNT: usize = ITEM_COUNT * 2;
 		for _ in 0..INITIAL_ITEM_COUNT {
-			let new_value = rng.gen::<i64>();
+			let new_value = rng.random::<i64>();
 			let new_key = vec.push(new_value);
 			keys.push(new_key);
 
@@ -378,7 +378,7 @@ mod tests {
 
 		const HALF_ITEM_COUNT: usize = ITEM_COUNT / 2;
 		for _ in 0..(ITEM_COUNT + HALF_ITEM_COUNT) {
-			let key_index = rng.gen_range(0..keys.len());
+			let key_index = rng.random_range(0..keys.len());
 			let key = keys.swap_remove(key_index);
 			vec.remove(&key);
 
@@ -386,7 +386,7 @@ mod tests {
 		}
 
 		for _ in 0..HALF_ITEM_COUNT {
-			let new_value = rng.gen::<i64>();
+			let new_value = rng.random::<i64>();
 			let new_key = vec.push(new_value);
 			keys.push(new_key);
 		}
@@ -409,20 +409,20 @@ mod tests {
 		let mut keys = Vec::<FaVecIndex>::new();
 
 		for _ in 0..2 * ITEM_COUNT {
-			let new_value = rng.gen::<i64>();
+			let new_value = rng.random::<i64>();
 			let new_key = vec.push(new_value);
 			keys.push(new_key);
 		}
 
 		for _ in 0..10 {
 			for _ in 0..ITEM_COUNT {
-				let key_index = rng.gen_range(0..keys.len());
+				let key_index = rng.random_range(0..keys.len());
 				let key = keys.swap_remove(key_index);
 				vec.remove(&key);
 			}
 
 			for _ in 0..ITEM_COUNT {
-				let new_value = rng.gen::<i64>();
+				let new_value = rng.random::<i64>();
 				let new_key = vec.push(new_value);
 				keys.push(new_key);
 			}
