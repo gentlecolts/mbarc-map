@@ -1,6 +1,5 @@
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::{Index, IndexMut};
 
 struct DataBlock<T, const BLOCK_SIZE: usize> {
 	free_space: usize,
@@ -22,14 +21,14 @@ impl<T, const BLOCK_SIZE: usize> DataBlock<T, BLOCK_SIZE> {
 
 		//the above assert means this MUST find a value, assuming free_space is accurate
 		let mut stored_offset = 0;
-		//TODO: improve this loop further.  maybe iters like find?  simd-ify it?
+		//TODO: improve this loop further.  maybe iters like find?
 		for (i, item) in self.data.iter_mut().enumerate() {
 			if item.is_none() {
 				let _ = item.insert(val);
 				stored_offset = i;
 				break;
 			}
-			//TODO: if we get here and i is last element, we should panic with std::unreachable
+			//TODO: if we get here and i is last element, we should maybe panic with std::unreachable
 		}
 		self.free_space -= 1;
 
@@ -79,7 +78,7 @@ pub(crate) struct FaVec<T, const BLOCK_SIZE: usize> {
 impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 	//need to ensure block*blocksize+offset<=usize::MAX -1
 	//max for offset is blocksize-1
-	// block*blocksize+blocksize-1 <= usize::max - 1
+	//block*blocksize+blocksize-1 <= usize::max - 1
 	//block*(blocksize+1) <= usize::max
 	//block <= usize::max / (blocksize+1)
 	//if block = usize::max/(blocksize+1) and we are full, push should panic instead of adding new data
@@ -121,18 +120,6 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 			//println!("block {} was the last block with {} free indices, removing", block_index, old_free_space);
 		}
 
-		/*
-		//TODO: use entry instead
-		match self.free_space_map.get_mut(&new_free_space) {
-			Some(new_blocks_map) => {
-				new_blocks_map.insert(block_index);
-			}
-			None => {
-				let mut new_set = BTreeSet::new();
-				new_set.insert(block_index);
-				self.free_space_map.insert(new_free_space, new_set);
-			}
-		}// */
 		match self.free_space_map.entry(new_free_space) {
 			Entry::Occupied(mut entry) => {
 				entry.get_mut().insert(block_index);
@@ -226,17 +213,9 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 
 		//println!("added item, free space map is now: {:?}", self.free_space_map);
 
-		// */
 		FaVecIndex::index_from_block_offset(block_index, stored_offset)
-		/*
-		FaVecIndex{
-			block_index,
-			offset:stored_index,
-		}
-		// */
 	}
 
-	//as_ref() for &Option<T> -> Option<&T>
 	pub fn get(&self, index: &FaVecIndex<BLOCK_SIZE>) -> Option<&T> {
 		let (block_index, offset) = FaVecIndex::index_to_block_offset(index);
 		//let (block_index, offset) = (index.block_index,index.offset);
@@ -254,17 +233,13 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 	//todo: evaluate necessity of mut
 	pub fn get_mut(&mut self, index: &FaVecIndex<BLOCK_SIZE>) -> Option<&mut T> {
 		let (block_index, offset) = FaVecIndex::index_to_block_offset(index);
-		//let (block_index, offset) = (index.block_index,index.offset);
 
 		if block_index >= self.data_blocks.len() || offset >= BLOCK_SIZE {
 			return None;
 		}
 
 		match self.data_blocks.get_mut(block_index) {
-			Some(block) => {
-				//block.data.get_mut(offset).unwrap().as_mut()
-				block.data[offset].as_mut()
-			}
+			Some(block) => block.data[offset].as_mut(),
 			None => None,
 		}
 	}
@@ -294,7 +269,6 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 	//todo: evaluate necessity of mut
 	pub fn remove(&mut self, index: &FaVecIndex<BLOCK_SIZE>) -> Option<T> {
 		let (block_index, offset) = FaVecIndex::index_to_block_offset(index);
-		//let (block_index, offset) = (index.block_index,index.offset);
 
 		assert!(block_index < self.data_blocks.len());
 		assert!(offset < BLOCK_SIZE);
@@ -306,28 +280,9 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 
 		let removed_item = match self.data_blocks.get_mut(block_index) {
 			Some(block) => {
-				//let item = ;
 				let removed = block.data.get_mut(offset).unwrap().take();
 
 				if removed.is_some() {
-					/*
-					assert!(self.free_space_map.contains_key(&block.free_space));
-					self.free_space_map.get_mut(&block.free_space).unwrap().remove(&block_index);
-
-					let new_free_space=block.free_space+1;
-					block.free_space+=new_free_space;
-
-					match self.free_space_map.get_mut(&new_free_space){
-						Some(block_indices)=>{
-							block_indices.insert(block_index);
-						}
-						None => {
-							let mut new_set=BTreeSet::new();
-							new_set.insert(block_index);
-							self.free_space_map.insert(new_free_space, new_set);
-						}
-					}
-					// */
 					let _old_free_space = block.free_space; //for debugging
 
 					let new_free_space = block.free_space + 1;
@@ -353,31 +308,48 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 	pub fn capacity(&self) -> usize {
 		self.data_blocks.len() * BLOCK_SIZE
 	}
-}
 
-/*
-impl<T, const BLOCK_SIZE: usize> Index<usize> for FaVec<T, BLOCK_SIZE> {
-	type Output = T;
-	fn index(&self, i: usize) -> &T {
-		self.get(&i).unwrap()
+	pub fn iter(&self) -> FaVecIter<T, BLOCK_SIZE> {
+		FaVecIter {
+			block_index: 0,
+			offset: 0,
+			fa_vec: self,
+		}
 	}
 }
 
-impl<T, const BLOCK_SIZE: usize> IndexMut<usize> for FaVec<T, BLOCK_SIZE> {
-	fn index_mut(&mut self, i: usize) -> &mut T {
-		self.get_mut(&i).unwrap()
+pub struct FaVecIter<'a, T, const BLOCK_SIZE: usize> {
+	block_index: usize,
+	offset: usize,
+
+	fa_vec: &'a FaVec<T, BLOCK_SIZE>,
+}
+
+impl<'a, T, const BLOCK_SIZE: usize> FaVecIter<'a, T, BLOCK_SIZE> {
+	fn increment(&mut self) {
+		self.offset += 1;
+		if self.offset >= BLOCK_SIZE {
+			self.offset = 0;
+			self.block_index += 1;
+		}
 	}
 }
-*/
 
-pub struct FaVecIter {
-	index: usize,
-}
-impl Iterator for FaVecIter {
-	type Item = ();
+impl<'a, T, const BLOCK_SIZE: usize> Iterator for FaVecIter<'a, T, BLOCK_SIZE> {
+	type Item = &'a T;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		todo!()
+		while self.block_index < self.fa_vec.data_blocks.len() {
+			let block_ref = self.fa_vec.data_blocks.get(self.block_index).unwrap();
+			let item = &block_ref.data[self.offset];
+
+			self.increment();
+
+			if item.is_some() {
+				return item.as_ref();
+			}
+		}
+		None
 	}
 }
 
@@ -512,6 +484,21 @@ mod tests {
 		//println!("indices inserted: {:?}",keys);
 
 		validate_vec_properties(&mut vec);
+	}
+
+	#[test]
+	fn iterator_basic() {
+		let mut vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
+
+		let _first = vec.push(5);
+		let _second = vec.push(7);
+		let _third = vec.push(2);
+
+		vec.remove(&_second);
+
+		let vals = vec.iter().copied().collect::<Vec<i64>>();
+
+		assert_eq!(vals, vec![5, 2]);
 	}
 
 	fn validate_vec_properties(vec: &mut FaVec<i64, TEST_BLOCK_SIZE>) {

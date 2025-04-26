@@ -2,8 +2,8 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
-use std::sync::{Arc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::data_holder::{DataHolder, SharedDataContainerType};
 use crate::data_reference::DataReference;
@@ -27,10 +27,15 @@ type HashType<T, U> = HashMap<T, U>;
 ///
 /// This map is not quite a true HashMap, implementing many non-constant (though still sub-linear) operations for managing metadata.
 /// The theory behind this approach, however, is that by keeping mutex lock duration to a minimum and everything else "fast enough", any potential performance losses elsewhere should be more than made up accounted for in practice by allowing more saturated thread usage.
-
 pub struct MbarcMap<T: Hash + Eq, U> {
 	data: SharedDataContainerType<U>,
 	data_refs: Arc<Mutex<HashType<T, DataReference<U>>>>,
+}
+
+impl<T: Hash + Eq, U> Default for MbarcMap<T, U> {
+	fn default() -> Self {
+		Self::new()
+	}
 }
 
 impl<T: Hash + Eq, U> MbarcMap<T, U> {
@@ -70,10 +75,13 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 		let inserted_item = data_lock.get_mut(&new_key).unwrap();
 		inserted_item.owning_key = new_key;
 
-		refs_lock.insert(key, DataReference {
-			ptr: NonNull::new(inserted_item as *mut DataHolder<U>).unwrap(),
-			phantom: PhantomData,
-		})
+		refs_lock.insert(
+			key,
+			DataReference {
+				ptr: NonNull::new(inserted_item as *mut DataHolder<U>).unwrap(),
+				phantom: PhantomData,
+			},
+		)
 	}
 
 	/// Returns `true` if the map contains a value for the specified key.
@@ -93,7 +101,7 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 	pub fn get(&self, key: &T) -> Option<DataReference<U>> {
 		match self.data_refs.lock().unwrap().get(key) {
 			Some(rval) => Some(rval.clone()),
-			None => None
+			None => None,
 		}
 	}
 
@@ -106,7 +114,7 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 				value_ref.raw_data().set_deleted();
 				Some(value_ref)
 			}
-			None => None
+			None => None,
 		}
 	}
 
@@ -120,7 +128,9 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 	/// Important concurrency note: This iterator will represent the state of the map at creation time.
 	/// Adding or removing elements during iteration (in this thread or others) will not have any impact on iteration order, and creation of this iterator has a cost.
 	//TODO: make all iterators generated from macro, to ensure they really are "identical" (????)
-	pub fn iter(&self) -> crate::minimally_blocking_atomic_reference_counted_map::Iter<DataReference<U>> {
+	pub fn iter(
+		&self,
+	) -> crate::minimally_blocking_atomic_reference_counted_map::Iter<DataReference<U>> {
 		let ref_lock = self.data_refs.lock().unwrap();
 		let mut vals = VecDeque::with_capacity(ref_lock.len());
 
@@ -128,9 +138,7 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 			vals.push_back(value.clone());
 		}
 
-		Iter {
-			items: vals
-		}
+		Iter { items: vals }
 	}
 
 	/// Exclusive lock on the map for iteration.  This does not clone any elements, therefore requiring a lock is taken on the map.
@@ -158,9 +166,7 @@ impl<T: Hash + Eq + Clone, U> MbarcMap<T, U> {
 			vals.push_back((key.clone(), value.clone()));
 		}
 
-		Iter {
-			items: vals
-		}
+		Iter { items: vals }
 	}
 }
 
@@ -176,14 +182,12 @@ impl<T: Hash + Eq + Copy, U> MbarcMap<T, U> {
 			vals.push_back((*key, value.clone()));
 		}
 
-		Iter {
-			items: vals
-		}
+		Iter { items: vals }
 	}
 }
 
-unsafe impl<T: Hash + Eq,U> Send for MbarcMap<T, U> {}
-unsafe impl<T: Hash + Eq,U> Sync for MbarcMap<T, U> {}
+unsafe impl<T: Hash + Eq, U> Send for MbarcMap<T, U> {}
+unsafe impl<T: Hash + Eq, U> Sync for MbarcMap<T, U> {}
 
 impl<T: Hash + Eq, U> Drop for MbarcMap<T, U> {
 	fn drop(&mut self) {
@@ -195,7 +199,10 @@ impl<T: Hash + Eq, U> Drop for MbarcMap<T, U> {
 	}
 }
 
-impl<K, V, const N: usize> From<[(K, V); N]> for MbarcMap<K, V> where K: Eq + Hash {
+impl<K, V, const N: usize> From<[(K, V); N]> for MbarcMap<K, V>
+where
+	K: Eq + Hash,
+{
 	fn from(arr: [(K, V); N]) -> Self {
 		let map = Self::new();
 
@@ -234,7 +241,7 @@ pub struct LockedContainer<'a, T, U> {
 }
 
 impl<'a, T, U> LockedContainer<'a, T, U> {
-	pub fn iter(&self) -> impl Iterator<Item=(&T, &DataReference<U>)> {
+	pub fn iter(&self) -> impl Iterator<Item = (&T, &DataReference<U>)> {
 		self.items.iter()
 	}
 }
