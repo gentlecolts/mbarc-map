@@ -20,15 +20,15 @@ mod minimally_blocking_atomic_reference_counted_map;
 
 #[cfg(test)]
 mod tests {
+	use rand::prelude::*;
+	use rand_chacha::ChaCha8Rng;
+	use rayon::prelude::*;
 	use std::any::TypeId;
 	use std::collections::HashMap;
 	use std::mem::size_of;
 	use std::ops::Deref;
 	use std::sync::{Arc, Mutex, MutexGuard};
 	use std::thread;
-	use rand::prelude::*;
-	use rand_chacha::ChaCha8Rng;
-	use rayon::prelude::*;
 
 	use super::*;
 
@@ -48,7 +48,6 @@ mod tests {
 
 		pairs
 	}
-
 
 	#[test]
 	fn test_use_element_after_drop_one_value() {
@@ -114,22 +113,25 @@ mod tests {
 			base_hash.insert(*k, *v);
 		});
 
-		let (initial_insertions, parallel_inserted_while_removing) = source_data.split_at(START_REMOVING_INDEX);
+		let (initial_insertions, parallel_inserted_while_removing) =
+			source_data.split_at(START_REMOVING_INDEX);
 
 		for (k, v) in initial_insertions {
 			concurrent_hash.insert(*k, *v);
 		}
 
-		parallel_inserted_while_removing.par_iter().enumerate().for_each(|(i, (k, v))| {
-			let remove_key = source_data.get(i).unwrap().0;
-			concurrent_hash.remove(&remove_key);
+		parallel_inserted_while_removing
+			.par_iter()
+			.enumerate()
+			.for_each(|(i, (k, v))| {
+				let remove_key = source_data.get(i).unwrap().0;
+				concurrent_hash.remove(&remove_key);
 
-			concurrent_hash.insert(*k, *v);
-		});
+				concurrent_hash.insert(*k, *v);
+			});
 
 		assert_hash_contents_equal(&base_hash, concurrent_hash)
 	}
-
 
 	fn insert_several<const N: usize>(from: &PreSeed<N>, to: &mut HashMap<i64, i64>) {
 		for (k, v) in from.iter() {
@@ -138,7 +140,9 @@ mod tests {
 	}
 
 	fn insert_several_threaded<const N: usize>(from: &PreSeed<N>, to: &Arc<MbarcMap<i64, i64>>) {
-		from.par_iter().for_each(|(k, v)| { to.insert(*k, *v); });
+		from.par_iter().for_each(|(k, v)| {
+			to.insert(*k, *v);
+		});
 	}
 
 	#[test]
@@ -161,7 +165,10 @@ mod tests {
 		println!("Insert test done");
 	}
 
-	fn assert_hash_contents_equal(base_hash: &Box<HashMap<i64, i64>>, concurrent_hash: Arc<MbarcMap<i64, i64>>) {
+	fn assert_hash_contents_equal(
+		base_hash: &HashMap<i64, i64>,
+		concurrent_hash: Arc<MbarcMap<i64, i64>>,
+	) {
 		//println!("Comparing values after insert");
 		for (k, v) in base_hash.iter() {
 			//println!("Checking for {} and {}",k,v);
@@ -202,7 +209,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_iterator() {
+	fn test_key_iterator() {
 		const N: usize = 100000;
 
 		let source_data = make_data_pairs::<N>(FIXED_SEED);
@@ -222,6 +229,21 @@ mod tests {
 		assert_eq!(base_hash.len(), 0);
 	}
 
+	#[test]
+	fn test_value_iterator_preserves_insert_order_when_no_removal() {
+		const N: usize = 100000;
+
+		let source_data = make_data_pairs::<N>(FIXED_SEED);
+		let base_hash = MbarcMap::new();
+
+		source_data.iter().for_each(|(k, v)| {
+			base_hash.insert(*k, *v);
+		});
+
+		for (i, value) in base_hash.iter_copied_values_ordered().enumerate() {
+			assert_eq!(source_data[i].1, *value.lock().unwrap());
+		}
+	}
 
 	#[test]
 	fn test_drop() {
@@ -267,7 +289,7 @@ mod tests {
 		let item = map.get(&0).unwrap();
 		assert_eq!(item.lock().unwrap().deref().get(), TEST_TYPE_VALUE);
 
-		let raw: &Mutex::<dyn TestTrait> = item.deref();
+		let raw: &Mutex<dyn TestTrait> = item.deref();
 		assert_eq!(raw.lock().unwrap().get(), TEST_TYPE_VALUE);
 	}
 
@@ -280,15 +302,15 @@ mod tests {
 
 		insert_several_threaded(&source_data, &concurrent_hash);
 
-		let result=thread::scope(|scope|{
-			let v:Arc<Mutex<Vec<(i64,DataReference<i64>)>>>=Default::default();
+		let result = thread::scope(|scope| {
+			let v: Arc<Mutex<Vec<(i64, DataReference<i64>)>>> = Default::default();
 
-			for _ in 0..2{
-				let my_hash=concurrent_hash.clone();
-				let my_vec=v.clone();
-				scope.spawn(move ||{
-					for (k, v) in my_hash.iter_exclusive().iter(){
-						my_vec.lock().unwrap().push((*k,v.clone()))
+			for _ in 0..2 {
+				let my_hash = concurrent_hash.clone();
+				let my_vec = v.clone();
+				scope.spawn(move || {
+					for (k, v) in my_hash.iter_exclusive().iter() {
+						my_vec.lock().unwrap().push((*k, v.clone()))
 					}
 				});
 			}
@@ -296,174 +318,172 @@ mod tests {
 			v
 		});
 
-		let result=match Arc::try_unwrap(result){
-			Ok(r) => {
-				r.into_inner().unwrap()
-			}
+		let result = match Arc::try_unwrap(result) {
+			Ok(r) => r.into_inner().unwrap(),
 			Err(_) => {
 				unreachable!()
 			}
 		};
 
-		assert_eq!(result.len(),2*N);
+		assert_eq!(result.len(), 2 * N);
 
-		for i in 0..N{
-			let (k1,v1)=&result[i];
-			let (k2,v2)=&result[i+N];
+		for i in 0..N {
+			let (k1, v1) = &result[i];
+			let (k2, v2) = &result[i + N];
 
-			assert_eq!(*k1,*k2);
+			assert_eq!(*k1, *k2);
 
-			let v1=*v1.lock().unwrap();
-			let v2=*v2.lock().unwrap();
-			assert_eq!(v1,v2);
+			let v1 = *v1.lock().unwrap();
+			let v2 = *v2.lock().unwrap();
+			assert_eq!(v1, v2);
 		}
 	}
 
-	struct GenericRefTestType{
-		a: MbarcMap<usize,u32>,
-		b: MbarcMap<usize,u64>,
+	struct GenericRefTestType {
+		a: MbarcMap<usize, u32>,
+		b: MbarcMap<usize, u64>,
 	}
 
-	impl GenericRefTestType{
-		const A_ITEM_KEY: usize=0;
-		const B_ITEM_KEY: usize=0;
+	impl GenericRefTestType {
+		const A_ITEM_KEY: usize = 0;
+		const B_ITEM_KEY: usize = 0;
 
-		fn new(a_val:u32,b_val:u64)->Self{
-			let a=MbarcMap::new();
-			let b=MbarcMap::new();
+		fn new(a_val: u32, b_val: u64) -> Self {
+			let a = MbarcMap::new();
+			let b = MbarcMap::new();
 
 			a.insert(Self::A_ITEM_KEY, a_val);
 			b.insert(Self::B_ITEM_KEY, b_val);
 
-			Self{a,b}
+			Self { a, b }
 		}
 
-		fn get_from_a(&self)->DataReferenceGeneric{
+		fn get_from_a(&self) -> DataReferenceGeneric {
 			DataReferenceGeneric::from(self.a.get(&Self::A_ITEM_KEY).unwrap())
 		}
 
-		fn get_from_b(&self)->DataReferenceGeneric{
+		fn get_from_b(&self) -> DataReferenceGeneric {
 			DataReferenceGeneric::from(self.b.get(&Self::B_ITEM_KEY).unwrap())
 		}
 
-		fn a_ref_count(&self)->usize{
-			//numder of refs, minus the temporary one we just created
+		fn a_ref_count(&self) -> usize {
+			//number of refs, minus the temporary one we just created
 			self.a.get(&Self::A_ITEM_KEY).unwrap().ref_count() - 1
 		}
 
-		fn b_ref_count(&self)->usize{
-			//numder of refs, minus the temporary one we just created
+		fn b_ref_count(&self) -> usize {
+			//number of refs, minus the temporary one we just created
 			self.b.get(&Self::B_ITEM_KEY).unwrap().ref_count() - 1
 		}
 
-		fn set_a(&self,value: u32){
-			*self.a.get(&Self::A_ITEM_KEY).unwrap().lock().unwrap()=value;
+		fn set_a(&self, value: u32) {
+			*self.a.get(&Self::A_ITEM_KEY).unwrap().lock().unwrap() = value;
 		}
 
-		fn set_b(&self,value: u64){
-			*self.b.get(&Self::B_ITEM_KEY).unwrap().lock().unwrap()=value;
+		fn set_b(&self, value: u64) {
+			*self.b.get(&Self::B_ITEM_KEY).unwrap().lock().unwrap() = value;
 		}
 	}
 
 	#[test]
-	fn test_generic_morphing(){
-		const A_VALUE:u32=0;
-		const B_VALUE:u64=0;
+	fn test_generic_morphing() {
+		const A_VALUE: u32 = 0;
+		const B_VALUE: u64 = 0;
 
-		let tester=GenericRefTestType::new(A_VALUE,B_VALUE);
+		let tester = GenericRefTestType::new(A_VALUE, B_VALUE);
 
-		assert_eq!(tester.a_ref_count(),1);
-		assert_eq!(tester.b_ref_count(),1);
+		assert_eq!(tester.a_ref_count(), 1);
+		assert_eq!(tester.b_ref_count(), 1);
 
-		let a_generic=tester.get_from_a();
-		let b_generic=tester.get_from_b();
+		let a_generic = tester.get_from_a();
+		let b_generic = tester.get_from_b();
 
-		assert_eq!(tester.a_ref_count(),2);
-		assert_eq!(tester.b_ref_count(),2);
+		assert_eq!(tester.a_ref_count(), 2);
+		assert_eq!(tester.b_ref_count(), 2);
 
-		assert_eq!(a_generic.type_id(),TypeId::of::<DataReference<u32>>());
-		assert_eq!(a_generic.inner_type_id(),TypeId::of::<u32>());
+		assert_eq!(a_generic.type_id(), TypeId::of::<DataReference<u32>>());
+		assert_eq!(a_generic.inner_type_id(), TypeId::of::<u32>());
 
-		assert_eq!(b_generic.type_id(),TypeId::of::<DataReference<u64>>());
-		assert_eq!(b_generic.inner_type_id(),TypeId::of::<u64>());
+		assert_eq!(b_generic.type_id(), TypeId::of::<DataReference<u64>>());
+		assert_eq!(b_generic.inner_type_id(), TypeId::of::<u64>());
 
-		let not_a=a_generic.to_typed::<u128>();
-		let not_b=b_generic.to_typed::<u128>();
+		let not_a = a_generic.to_typed::<u128>();
+		let not_b = b_generic.to_typed::<u128>();
 
 		assert!(not_a.is_none());
 		assert!(not_b.is_none());
 
-		assert_eq!(tester.a_ref_count(),2);
-		assert_eq!(tester.b_ref_count(),2);
+		assert_eq!(tester.a_ref_count(), 2);
+		assert_eq!(tester.b_ref_count(), 2);
 
-		let actually_a=a_generic.to_typed::<u32>();
-		let actually_b=b_generic.to_typed::<u64>();
+		let actually_a = a_generic.to_typed::<u32>();
+		let actually_b = b_generic.to_typed::<u64>();
 
 		assert!(actually_a.is_some());
 		assert!(actually_b.is_some());
 
-		assert_eq!(tester.a_ref_count(),3);
-		assert_eq!(tester.b_ref_count(),3);
+		assert_eq!(tester.a_ref_count(), 3);
+		assert_eq!(tester.b_ref_count(), 3);
 
 		drop(a_generic);
-		assert_eq!(tester.a_ref_count(),2);
+		assert_eq!(tester.a_ref_count(), 2);
 
 		drop(b_generic);
-		assert_eq!(tester.b_ref_count(),2);
+		assert_eq!(tester.b_ref_count(), 2);
 
-		let actually_a=actually_a.unwrap();
-		let actually_b=actually_b.unwrap();
+		let actually_a = actually_a.unwrap();
+		let actually_b = actually_b.unwrap();
 
-		assert_eq!(*actually_a.lock().unwrap(),A_VALUE);
-		assert_eq!(*actually_b.lock().unwrap(),B_VALUE);
+		assert_eq!(*actually_a.lock().unwrap(), A_VALUE);
+		assert_eq!(*actually_b.lock().unwrap(), B_VALUE);
 
-		const NEW_A: u32=11;
-		const NEW_B: u64=12;
+		const NEW_A: u32 = 11;
+		const NEW_B: u64 = 12;
 
 		tester.set_a(NEW_A);
 		tester.set_b(NEW_B);
 
-		assert_eq!(*actually_a.lock().unwrap(),NEW_A);
-		assert_eq!(*actually_b.lock().unwrap(),NEW_B);
+		assert_eq!(*actually_a.lock().unwrap(), NEW_A);
+		assert_eq!(*actually_b.lock().unwrap(), NEW_B);
 	}
 
 	#[test]
-	fn test_generic_early_drop(){
-		const A_VALUE:u32=0;
-		const B_VALUE:u64=0;
+	fn test_generic_early_drop() {
+		const A_VALUE: u32 = 0;
+		const B_VALUE: u64 = 0;
 
-		let tester=GenericRefTestType::new(A_VALUE,B_VALUE);
+		let tester = GenericRefTestType::new(A_VALUE, B_VALUE);
 
-		assert_eq!(tester.a_ref_count(),1);
-		assert_eq!(tester.b_ref_count(),1);
+		assert_eq!(tester.a_ref_count(), 1);
+		assert_eq!(tester.b_ref_count(), 1);
 
-		let a_generic=tester.get_from_a();
-		let b_generic=tester.get_from_b();
+		let a_generic = tester.get_from_a();
+		let b_generic = tester.get_from_b();
 
-		assert_eq!(tester.a_ref_count(),2);
-		assert_eq!(tester.b_ref_count(),2);
+		assert_eq!(tester.a_ref_count(), 2);
+		assert_eq!(tester.b_ref_count(), 2);
 
 		drop(tester);
 
-		let actually_a=a_generic.to_typed::<u32>();
-		let actually_b=b_generic.to_typed::<u64>();
+		let actually_a = a_generic.to_typed::<u32>();
+		let actually_b = b_generic.to_typed::<u64>();
 
 		assert!(actually_a.is_some());
 		assert!(actually_b.is_some());
 
-		let actually_a=actually_a.unwrap();
-		let actually_b=actually_b.unwrap();
+		let actually_a = actually_a.unwrap();
+		let actually_b = actually_b.unwrap();
 
-		assert_eq!(actually_a.ref_count(),2);
-		assert_eq!(actually_b.ref_count(),2);
+		assert_eq!(actually_a.ref_count(), 2);
+		assert_eq!(actually_b.ref_count(), 2);
 
 		drop(a_generic);
-		assert_eq!(actually_a.ref_count(),1);
+		assert_eq!(actually_a.ref_count(), 1);
 
 		drop(b_generic);
-		assert_eq!(actually_b.ref_count(),1);
+		assert_eq!(actually_b.ref_count(), 1);
 
-		assert_eq!(*actually_a.lock().unwrap(),A_VALUE);
-		assert_eq!(*actually_b.lock().unwrap(),B_VALUE);
+		assert_eq!(*actually_a.lock().unwrap(), A_VALUE);
+		assert_eq!(*actually_b.lock().unwrap(), B_VALUE);
 	}
 }

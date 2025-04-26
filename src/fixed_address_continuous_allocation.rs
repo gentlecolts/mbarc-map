@@ -309,10 +309,22 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 		self.data_blocks.len() * BLOCK_SIZE
 	}
 
+	pub fn len(&self) -> usize {
+		self.free_space_map
+			.iter()
+			.fold(0, |acc, (free_space, items)| {
+				let used_space = BLOCK_SIZE - free_space;
+				let block_count = items.len();
+
+				acc + used_space * block_count
+			})
+	}
+
 	pub fn iter(&self) -> FaVecIter<T, BLOCK_SIZE> {
 		FaVecIter {
 			block_index: 0,
 			offset: 0,
+			real_count: 0,
 			fa_vec: self,
 		}
 	}
@@ -321,6 +333,7 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 pub struct FaVecIter<'a, T, const BLOCK_SIZE: usize> {
 	block_index: usize,
 	offset: usize,
+	real_count: usize,
 
 	fa_vec: &'a FaVec<T, BLOCK_SIZE>,
 }
@@ -346,10 +359,17 @@ impl<'a, T, const BLOCK_SIZE: usize> Iterator for FaVecIter<'a, T, BLOCK_SIZE> {
 			self.increment();
 
 			if item.is_some() {
+				self.real_count += 1;
 				return item.as_ref();
 			}
 		}
 		None
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		//TODO: cache len?
+		let size = self.fa_vec.len() - self.real_count;
+		(size, Some(size))
 	}
 }
 
@@ -393,6 +413,7 @@ mod tests {
 		//it's noisy, but worth looking at if there's an issue
 		//println!("indices inserted: {:?}",keys);
 
+		assert_eq!(vec.len(), keys.len());
 		validate_vec_properties(&mut vec);
 	}
 
@@ -435,6 +456,7 @@ mod tests {
 		//it's noisy, but worth looking at if there's an issue
 		//println!("indices inserted: {:?}",keys);
 
+		assert_eq!(vec.len(), keys.len());
 		validate_vec_properties(&mut vec);
 	}
 
@@ -483,6 +505,7 @@ mod tests {
 		//it's noisy, but worth looking at if there's an issue
 		//println!("indices inserted: {:?}",keys);
 
+		assert_eq!(vec.len(), keys.len());
 		validate_vec_properties(&mut vec);
 	}
 
@@ -499,6 +522,7 @@ mod tests {
 		let vals = vec.iter().copied().collect::<Vec<i64>>();
 
 		assert_eq!(vals, vec![5, 2]);
+		assert_eq!(vec.len(), 2);
 	}
 
 	fn validate_vec_properties(vec: &mut FaVec<i64, TEST_BLOCK_SIZE>) {

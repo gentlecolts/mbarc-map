@@ -25,7 +25,7 @@ type HashType<T, U> = HashMap<T, U>;
 /// - Values are implicitly wrapped in their own Mutex, requiring only that locks are taken on a per-element basis for data access
 /// - Values are only dropped when all [DataReference]s to them have been dropped
 ///
-/// This map is not quite a true HashMap, implementing many non-constant (though still sub-linear) operations for managing metadata.
+/// This map is not quite a true HashMap, implementing many non-constant (though still sublinear) operations for managing metadata.
 /// The theory behind this approach, however, is that by keeping mutex lock duration to a minimum and everything else "fast enough", any potential performance losses elsewhere should be more than made up accounted for in practice by allowing more saturated thread usage.
 pub struct MbarcMap<T: Hash + Eq, U> {
 	data: SharedDataContainerType<U>,
@@ -99,10 +99,7 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 	/// Note that, in threaded contexts, it is possible for another thread to potentially remove the value you get before you can use it.
 	/// In cases like this, the value referenced by the returned [DataReference] will not be dropped until all remaining [DataReference] have been dropped
 	pub fn get(&self, key: &T) -> Option<DataReference<U>> {
-		match self.data_refs.lock().unwrap().get(key) {
-			Some(rval) => Some(rval.clone()),
-			None => None,
-		}
+		self.data_refs.lock().unwrap().get(key).cloned()
 	}
 
 	/// Returns a [DataReference] to the value corresponding to the key and removes the key/value from this map.  If the key is not present, None will be returned
@@ -123,6 +120,11 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 		self.data_refs.lock().unwrap().len()
 	}
 
+	///Returns `true` if the map contains no elements.
+	pub fn is_empty(&self) -> bool {
+		self.data_refs.lock().unwrap().is_empty()
+	}
+
 	/// An iterator visiting all values in arbitrary order
 	///
 	/// Important concurrency note: This iterator will represent the state of the map at creation time.
@@ -139,6 +141,15 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 		}
 
 		Iter { items: vals }
+	}
+
+	/// Value only iterator representing the values in this map at the time it is called.  The order of iteration will be the in-memory order of values, and this should be preferred if keys are not needed
+	pub fn iter_copied_values_ordered(&self) -> Iter<DataReference<U>> {
+		let data_lock = self.data.lock().unwrap();
+
+		Iter {
+			items: data_lock.iter().map(|a| a.make_new_ref()).collect(),
+		}
 	}
 
 	/// Exclusive lock on the map for iteration.  This does not clone any elements, therefore requiring a lock is taken on the map.

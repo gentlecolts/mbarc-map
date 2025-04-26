@@ -1,9 +1,11 @@
-use std::sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc, Mutex};
+use std::sync::{
+	atomic::{AtomicBool, AtomicUsize, Ordering},
+	Arc, Mutex,
+};
 
 use crate::fixed_address_continuous_allocation::{FaVec, FaVecIndex};
 
 pub(crate) type SharedDataContainerType<T> = Arc<Mutex<FaVec<DataHolder<T>, 32>>>;
-
 
 pub(crate) struct DataHolder<T> {
 	pub(crate) ref_count: AtomicUsize,
@@ -31,5 +33,12 @@ impl<T> DataHolder<T> {
 	pub(crate) fn set_deleted(&self) {
 		//TODO: evaluate safety of this ordering
 		self.pending_removal.store(true, Ordering::Release);
+	}
+
+	pub(crate) fn increment_refcount(&self) {
+		let old_rc = self.ref_count.fetch_add(1, Ordering::Relaxed);
+		if old_rc >= isize::MAX as usize {
+			std::process::abort();
+		}
 	}
 }

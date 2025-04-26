@@ -1,7 +1,15 @@
-use std::{marker::PhantomData, ops::Deref, ptr::NonNull, sync::{atomic::{self, Ordering}, Mutex}};
+use std::{
+	marker::PhantomData,
+	ops::Deref,
+	ptr::NonNull,
+	sync::{
+		atomic::{self, Ordering},
+		Mutex,
+	},
+};
 
 use crate::data_holder::DataHolder;
-
+use crate::MbarcMap;
 
 /// Atomic, reference counted pointer to data stored within an [MbarcMap].
 ///
@@ -67,15 +75,10 @@ impl<T> DataReference<T> {
 	}
 
 	pub(crate) fn increment_refcount(&self) {
-		let inner = self.raw_data();
-
-		let old_rc = inner.ref_count.fetch_add(1, Ordering::Relaxed);
-		if old_rc >= isize::MAX as usize {
-			std::process::abort();
-		}
+		self.raw_data().increment_refcount();
 	}
 
-	pub(crate) fn drop_impl(raw_ptr: NonNull<u8>){
+	pub(crate) fn drop_impl(raw_ptr: NonNull<u8>) {
 		let inner = unsafe { raw_ptr.cast::<DataHolder<T>>().as_ref() };
 
 		if inner.ref_count.fetch_sub(1, Ordering::Release) != 1 {
@@ -99,14 +102,20 @@ impl<T> Deref for DataReference<T> {
 	}
 }
 
-impl<T> Clone for DataReference<T> {
-	fn clone(&self) -> Self {
+impl<T> DataHolder<T> {
+	pub(crate) fn make_new_ref(&self) -> DataReference<T> {
 		self.increment_refcount();
 
-		Self {
-			ptr: self.ptr,
+		DataReference {
+			ptr: NonNull::from(self),
 			phantom: PhantomData,
 		}
+	}
+}
+
+impl<T> Clone for DataReference<T> {
+	fn clone(&self) -> Self {
+		self.raw_data().make_new_ref()
 	}
 }
 
