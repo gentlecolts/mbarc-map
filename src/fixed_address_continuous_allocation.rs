@@ -320,7 +320,7 @@ mod tests {
 
 	use crate::fixed_address_continuous_allocation::{FaVec, FaVecIndex};
 
-	const TEST_BLOCK_SIZE: usize = 512;
+	const TEST_BLOCK_SIZE: usize = 64;
 
 	#[test]
 	fn fa_vec_properties_test_random_io() {
