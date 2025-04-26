@@ -382,7 +382,7 @@ mod tests {
 
 	use crate::fixed_address_continuous_allocation::{FaVec, FaVecIndex};
 
-	const TEST_BLOCK_SIZE: usize = 64;
+	const TEST_BLOCK_SIZE: usize = 512;
 
 	#[test]
 	fn fa_vec_properties_test_random_io() {
@@ -523,6 +523,28 @@ mod tests {
 
 		assert_eq!(vals, vec![5, 2]);
 		assert_eq!(vec.len(), 2);
+		validate_vec_properties(&mut vec);
+	}
+
+	#[test]
+	fn ensure_correct_prune_on_block_edge() {
+		let mut vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
+
+		let mut last_block = FaVecIndex::from_absolute_index(0);
+		for i in 0..(TEST_BLOCK_SIZE + 1) {
+			last_block = vec.push(i as i64);
+		}
+
+		//previously, pruning was not correctly occurring when the end block became empty and no other blocks were vacant
+		vec.remove(&last_block);
+		//the free space map index tracking "completely vacant" blocks was being left as an empty set, instead of removed entirely, by the prune pass
+		//the application would then panic when trying to insert, due to not expecting a state where the set existed but was empty when later trying to insert
+		//the logic for finding where to insert expects that all tracked vacancy counts have at least one associated block, and becomes more complicated if it has to handle empty sets
+		//TODO: consider explicit test for auditing this assumption in the validate function below, though not sure it's relevant to other cases
+		vec.push((TEST_BLOCK_SIZE + 1) as i64);
+
+		assert_eq!(vec.len(), TEST_BLOCK_SIZE + 1);
+		validate_vec_properties(&mut vec);
 	}
 
 	fn validate_vec_properties(vec: &mut FaVec<i64, TEST_BLOCK_SIZE>) {
