@@ -1,0 +1,5 @@
+hard_tabs = true
+
+#merge_imports = true #deprecated for imports_granularity
+imports_granularity = "Module"
+#imports_granularity = "Crate"
