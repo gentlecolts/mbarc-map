@@ -12,7 +12,7 @@ pub(crate) struct DataHolder<T> {
 	//TODO: having these here rather than in DataReference means less duplication, but also makes for fatter entries in the FaVec array
 	//the deduplication is probably worth it, but will need to bench for it being worth the potentially less good caching behavior
 	pub(crate) owner: SharedDataContainerType<T>,
-	pub(crate) owning_key: FaVecIndex,
+	pub(crate) owning_key: FaVecIndex<32>,
 
 	pub data: Mutex<T>,
 }

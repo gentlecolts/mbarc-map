@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 
 use crate::data_holder::{DataHolder, SharedDataContainerType};
 use crate::data_reference::DataReference;
-use crate::fixed_address_continuous_allocation::FaVec;
+use crate::fixed_address_continuous_allocation::{FaVec, FaVecIndex};
 
 type HashType<T, U> = HashMap<T, U>;
 
@@ -63,7 +63,7 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 			pending_removal: AtomicBool::new(false),
 			data: Mutex::new(value),
 			owner: self.data.clone(),
-			owning_key: 0,
+			owning_key: FaVecIndex::from_absolute_index(0),
 		};
 
 		let new_key = data_lock.push(new_holder);
