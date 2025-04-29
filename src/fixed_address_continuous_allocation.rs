@@ -68,7 +68,8 @@ impl<const BLOCK_SIZE: usize> FaVecIndex<BLOCK_SIZE> {
 
 pub(crate) struct FaVec<T, const BLOCK_SIZE: usize> {
 	//TODO: we use Box to keep data_blocks small and allow efficient resize, however we also only add to/remove from data_blocks at the end index.
-	//TODO: Determine if it's most efficient to a) keep as-is, b) remove the Box, or c) remove empty blocks from the middle as well
+	//TODO: Determine if it's most efficient to a) keep as-is, b) remove the Box, or c) remove empty blocks from the middle as well, rather than just the end
+	//TODO: keep in mind that, if Box is removed here, we still must ensure that individual elements are pointer safe, ie never moved in memory
 	data_blocks: Vec<Box<DataBlock<T, BLOCK_SIZE>>>,
 
 	//maps free space to a set of indexes (in data)
