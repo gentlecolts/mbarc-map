@@ -463,8 +463,6 @@ mod tests {
 
 	#[test]
 	fn fa_vec_properties_test_add_remove_repeat() {
-		//randomly add and remove elements in a 2:1 ratio until data reaches a certain count
-
 		const ITEM_COUNT: usize = 100000;
 
 		let mut rng = ChaCha8Rng::seed_from_u64(0xDEADBEEF);

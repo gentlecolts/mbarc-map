@@ -12,7 +12,7 @@ use crate::fixed_address_continuous_allocation::{FaVec, FaVecIndex};
 //in which case, a potential future TODO would be configuring this on a per platform basis, or do more work in finding a smarter mechanism for choosing this value, if it's found that this is significant enough to matter
 //TODO: additionally, determine whether or not it's even worth exposing this, as it feels like doing so could encourage bad designs more so than support good ones
 //TODO: consider setting this via option_env! macro, giving an out-of-the-way means of configuring this if someone really needed to
-const DATA_HOLDER_BLOCK_SIZE_INTERNAL: usize = 32;
+pub(crate) const DATA_HOLDER_BLOCK_SIZE_INTERNAL: usize = 32;
 
 pub(crate) type SharedDataContainerType<T> =
 	Arc<Mutex<FaVec<DataHolder<T>, DATA_HOLDER_BLOCK_SIZE_INTERNAL>>>;

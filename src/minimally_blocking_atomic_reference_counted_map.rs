@@ -5,7 +5,7 @@ use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::data_holder::{DataHolder, SharedDataContainerType};
+use crate::data_holder::{DataHolder, SharedDataContainerType, DATA_HOLDER_BLOCK_SIZE_INTERNAL};
 use crate::data_reference::DataReference;
 use crate::fixed_address_continuous_allocation::{FaVec, FaVecIndex};
 
@@ -152,7 +152,7 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 		}
 	}
 
-	/// Exclusive lock on the map for iteration.  This does not clone any elements, therefore requiring a lock is taken on the map.
+	/// Exclusive lock on the map for iteration.  This does not clone any element references, therefore requiring a lock is taken on the map.
 	/// This returns a [LockedContainer], which only provides an iter() function, returning the iterator you want.
 	///
 	/// Usage: given some `my_hash: MbarcMap<T,U>`, lock and iterate over it via
@@ -161,6 +161,18 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 	pub fn iter_exclusive(&self) -> LockedContainer<'_, T, U> {
 		LockedContainer {
 			items: self.data_refs.lock().unwrap(),
+		}
+	}
+
+	/// Exclusive lock on the map for value iteration.  This does not clone any element references, therefore requiring a lock is taken on the map.
+	/// This returns a [LockedValuesContainer], which only provides an iter() function, returning the iterator you want.
+	///
+	/// Usage: given some `my_hash: MbarcMap<T,U>`, lock and iterate over it via
+	///
+	/// `for (k,v) in my_hash.iter_values_exclusive().iter()`
+	pub fn iter_values_exclusive(&self) -> LockedValuesContainer<'_, U> {
+		LockedValuesContainer {
+			items: self.data.lock().unwrap(),
 		}
 	}
 }
@@ -254,5 +266,19 @@ pub struct LockedContainer<'a, T, U> {
 impl<'a, T, U> LockedContainer<'a, T, U> {
 	pub fn iter(&self) -> impl Iterator<Item = (&T, &DataReference<U>)> {
 		self.items.iter()
+	}
+}
+
+/// Represents a lock to an [MbarcMap]'s internal map, used exclusively for locked, value-only iteration
+/// see [`iter_values_exclusive`]
+///
+/// [`iter_values_exclusive`]: MbarcMap::iter_values_exclusive
+pub struct LockedValuesContainer<'a, U> {
+	items: MutexGuard<'a, FaVec<DataHolder<U>, DATA_HOLDER_BLOCK_SIZE_INTERNAL>>,
+}
+
+impl<'a, U> LockedValuesContainer<'a, U> {
+	pub fn iter(&'a self) -> impl Iterator<Item = &'a Mutex<U>> {
+		self.items.iter().map(|value| &value.data)
 	}
 }

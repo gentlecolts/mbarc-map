@@ -246,6 +246,23 @@ mod tests {
 	}
 
 	#[test]
+	fn test_locked_value_iterator_preserves_insert_order_when_no_removal() {
+		const N: usize = 100000;
+
+		let source_data = make_data_pairs::<N>(FIXED_SEED);
+		let base_hash = MbarcMap::new();
+
+		source_data.iter().for_each(|(k, v)| {
+			base_hash.insert(*k, *v);
+		});
+
+		//TODO: this proves enumeration is correct, but does not prove that the map itself is being locked during iteration (such as in test_locked_iteration)
+		for (i, value) in base_hash.iter_values_exclusive().iter().enumerate() {
+			assert_eq!(source_data[i].1, *value.lock().unwrap());
+		}
+	}
+
+	#[test]
 	fn test_drop() {
 		const N: usize = 100000;
 
