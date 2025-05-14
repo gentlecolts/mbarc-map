@@ -3,7 +3,8 @@ use std::ops::{Index, IndexMut};
 
 struct DataBlock<T, const BLOCK_SIZE: usize> {
 	free_space: usize,
-	data: [Option<T>; BLOCK_SIZE],
+	//data: [Option<T>; BLOCK_SIZE],
+	data: Vec<Option<T>>,
 }
 
 impl<T, const BLOCK_SIZE: usize> DataBlock<T, BLOCK_SIZE> {
@@ -12,7 +13,8 @@ impl<T, const BLOCK_SIZE: usize> DataBlock<T, BLOCK_SIZE> {
 	fn new() -> Self {
 		Self {
 			free_space: BLOCK_SIZE,
-			data: [Self::EMPTY_ELEMENT; BLOCK_SIZE],
+			//data: [Self::EMPTY_ELEMENT; BLOCK_SIZE],
+			data: Vec::with_capacity(BLOCK_SIZE),
 		}
 	}
 }
