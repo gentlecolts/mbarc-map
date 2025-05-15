@@ -58,7 +58,7 @@ impl<const BLOCK_SIZE: usize> FaVecIndex<BLOCK_SIZE> {
 		)
 	}
 
-	fn as_absolute_index(&self) -> usize {
+	pub(crate) fn as_absolute_index(&self) -> usize {
 		self.absolute_index
 	}
 	pub(crate) fn from_absolute_index(absolute_index: usize) -> Self {

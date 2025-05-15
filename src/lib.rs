@@ -257,23 +257,6 @@ mod tests {
 	}
 
 	#[test]
-	fn test_locked_value_iterator_preserves_insert_order_when_no_removal() {
-		const N: usize = 100000;
-
-		let source_data = make_data_pairs::<N>(FIXED_SEED);
-		let base_hash = MbarcMap::new();
-
-		source_data.iter().for_each(|(k, v)| {
-			base_hash.insert(*k, *v);
-		});
-
-		//TODO: this proves enumeration is correct, but does not prove that the map itself is being locked during iteration (such as in test_locked_iteration)
-		for (i, value) in base_hash.iter_values_exclusive().iter().enumerate() {
-			assert_eq!(source_data[i].1, *value.lock().unwrap());
-		}
-	}
-
-	#[test]
 	fn test_drop() {
 		const N: usize = 100000;
 
@@ -515,8 +498,10 @@ mod tests {
 		assert_eq!(*actually_b.lock().unwrap(), B_VALUE);
 	}
 
-	#[test]
-	fn test_ensure_ordered_iterator_doesnt_use_already_freed_values() {
+	fn do_test_for_itertion_while_removing<F>(count_with_ordered_values: F)
+	where
+		F: FnOnce(Arc<MbarcMap<i64, i64>>) -> i64 + Send,
+	{
 		const N: usize = 100000;
 		let source_data = make_data_pairs_specific_value::<_, N>(|i| (i as i64, 1i64));
 		let concurrent_hash = Arc::new(MbarcMap::new());
@@ -553,19 +538,24 @@ mod tests {
 
 			s.spawn(move || side_vec.clear());
 
-			let result = s.spawn(move || {
-				let mut counter = 0i64;
-				for a in concurrent_hash.iter_copied_values_ordered() {
-					counter += *a.lock().unwrap();
-				}
-				counter
-			});
+			let result = s.spawn(move || count_with_ordered_values(concurrent_hash));
 
 			result.join().unwrap()
 		});
 
 		//println!("count={}",count);
 		assert_eq!(count, 0);
+	}
+
+	#[test]
+	fn test_ensure_ordered_iterator_doesnt_use_already_freed_values() {
+		do_test_for_itertion_while_removing(|concurrent_hash| {
+			let mut counter = 0i64;
+			for a in concurrent_hash.iter_copied_values_ordered() {
+				counter += *a.lock().unwrap();
+			}
+			counter
+		});
 	}
 
 	//TODO: test remove during iteration
