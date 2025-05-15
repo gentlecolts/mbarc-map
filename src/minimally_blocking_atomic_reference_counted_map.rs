@@ -148,7 +148,7 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 		let data_lock = self.data.lock().unwrap();
 
 		Iter {
-			items: data_lock.iter().map(|a| a.make_new_ref()).collect(),
+			items: data_lock.iter().filter_map(|a| a.make_new_ref()).collect(),
 		}
 	}
 

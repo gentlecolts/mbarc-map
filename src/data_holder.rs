@@ -45,10 +45,11 @@ impl<T> DataHolder<T> {
 		self.pending_removal.store(true, Ordering::Release);
 	}
 
-	pub(crate) fn increment_refcount(&self) {
+	pub(crate) fn increment_refcount(&self) -> usize {
 		let old_rc = self.ref_count.fetch_add(1, Ordering::Relaxed);
 		if old_rc >= isize::MAX as usize {
 			std::process::abort();
 		}
+		old_rc
 	}
 }

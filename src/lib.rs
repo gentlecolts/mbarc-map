@@ -20,6 +20,7 @@ mod minimally_blocking_atomic_reference_counted_map;
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use rand::prelude::*;
 	use rand_chacha::ChaCha8Rng;
 	use rayon::prelude::*;
@@ -30,23 +31,33 @@ mod tests {
 	use std::sync::{Arc, Mutex, MutexGuard};
 	use std::thread;
 
-	use super::*;
-
 	type PreSeed<const N: usize> = Box<[(i64, i64); N]>;
 
 	const FIXED_SEED: u64 = 0xDEADBEEF;
 
-	fn make_data_pairs<const N: usize>(seed: u64) -> PreSeed<N> {
-		let mut rng = ChaCha8Rng::seed_from_u64(seed);
-
+	fn make_data_pairs_specific_value<F, const N: usize>(mut f: F) -> PreSeed<N>
+	where
+		F: FnMut(usize) -> (i64, i64),
+	{
 		let mut pairs = Box::new([(0i64, 0i64); N]);
 		for i in 0..N {
-			let a = rng.random_range(i64::MIN..i64::MAX);
-			let b = rng.random_range(i64::MIN..i64::MAX);
+			//let a = rng.random_range(i64::MIN..i64::MAX);
+			let (a, b) = f(i);
 			pairs[i] = (a, b);
 		}
 
 		pairs
+	}
+
+	fn make_data_pairs<const N: usize>(seed: u64) -> PreSeed<N> {
+		let mut rng = ChaCha8Rng::seed_from_u64(seed);
+
+		make_data_pairs_specific_value::<_, N>(|_| {
+			let a = rng.random_range(i64::MIN..i64::MAX);
+			let b = rng.random_range(i64::MIN..i64::MAX);
+
+			(a, b)
+		})
 	}
 
 	#[test]
@@ -503,4 +514,59 @@ mod tests {
 		assert_eq!(*actually_a.lock().unwrap(), A_VALUE);
 		assert_eq!(*actually_b.lock().unwrap(), B_VALUE);
 	}
+
+	#[test]
+	fn test_ensure_ordered_iterator_doesnt_use_already_freed_values() {
+		const N: usize = 100000;
+		let source_data = make_data_pairs_specific_value::<_, N>(|i| (i as i64, 1i64));
+		let concurrent_hash = Arc::new(MbarcMap::new());
+
+		insert_several_threaded(&source_data, &concurrent_hash);
+
+		//remove everything from the map, but keep a vector of the vals
+
+		//drop the vector of vals, iterate
+		/*TODO: having DataHolder be able to create DataReferences breaks a fundamental promise that you have to have a handle to create/drop handles
+		the existing logic for ordered iteration also does not guarantee that the values iterated on actually exist in the map still anyways
+
+		given all of this, and the complexity of trying to make that situation work, it's a far better idea to instead:
+		a) remove the ability of data holders to spawn data references, revert what was dependent on that
+		b) do "ordered" iteration based on sorting refs by favec index, rather than trying to iterate on it directly
+		c) remove iteration functionality from favec
+
+		it'll be important to restore the promise that you must:
+		a) have at least one ref to interact with the ref count
+		b) only a single thread can possibly ever see the ref count hit 0
+		as these will be important for reducing the need for locks later
+		 */
+		let count = thread::scope(|s| {
+			let key_iter = concurrent_hash.iter_copied_keys();
+
+			let mut side_vec = Vec::new();
+			for (k, _) in key_iter {
+				side_vec.push(concurrent_hash.remove(&k));
+			}
+
+			//at this point, concurrent_hash should have no items in it, however side_vec keeps a ref to data
+			//when this was written, the ordered iterator was iterating on all alive values, regardless of whether they're still in the map
+			//because of this, the clear below in thread A, plus the concurrent iteration in thread B, could cause reads from invalid memory
+
+			s.spawn(move || side_vec.clear());
+
+			let result = s.spawn(move || {
+				let mut counter = 0i64;
+				for a in concurrent_hash.iter_copied_values_ordered() {
+					counter += *a.lock().unwrap();
+				}
+				counter
+			});
+
+			result.join().unwrap()
+		});
+
+		//println!("count={}",count);
+		assert_eq!(count, 0);
+	}
+
+	//TODO: test remove during iteration
 }

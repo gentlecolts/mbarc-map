@@ -103,19 +103,40 @@ impl<T> Deref for DataReference<T> {
 }
 
 impl<T> DataHolder<T> {
-	pub(crate) fn make_new_ref(&self) -> DataReference<T> {
-		self.increment_refcount();
+	pub(crate) fn make_new_ref(&self) -> Option<DataReference<T>> {
+		/*
+		Consider the case where, after this function was called, but before this instruction, the last DataReference for this DataHolder had gone out of scope
+		when dropped, the DataReference drops count to zero, and thus invalidates this object.
+		in practice, this can only happen if a DataReference outside MbarcMap is the last one dropped, and it happens during "ordered" values iteration, which call this function directly
+		if the ref count was already zero while this was still being called, then this is "removed", and may be at risk of dropping, and we should not return
+		this, however, is incomplete, as it is still possible that both the decrement and drop have completed in a separate thread, leaving &self as an invalid pointer, having been replaced by None within the DataBlock
+		while this state does seem "unlikely", and is avoidable it's still realistic, and needs addressing
+		it also seems very challenging to create a test case which validates this behavior
 
-		DataReference {
+		This leaves a few options:
+		a) remove the ordered iteration entirely.  benchmarks will be necessary to determine if this is worth consideration
+		b) perhaps some combination of MaybeUninit and/or manual drop could resolve this, rely on refcount instead of Option for determining slot availability in DataBlock, etc
+		...
+
+		There may be some lock-based solutions to this problem as well, however that is the opposite of the direction we want to head
+		ideally, this project could become nearly or completely lock-free, and so this is a problem that needs resolution
+		*/
+		if self.increment_refcount() == 0 {
+			//	self.ref_count.fetch_sub(1, Ordering::Release);
+			//	return None;
+		}
+
+		Some(DataReference {
 			ptr: NonNull::from(self),
 			phantom: PhantomData,
-		}
+		})
 	}
 }
 
 impl<T> Clone for DataReference<T> {
 	fn clone(&self) -> Self {
-		self.raw_data().make_new_ref()
+		//since we already are a DataReference, we must have at least one ref, this cannot fail
+		self.raw_data().make_new_ref().unwrap()
 	}
 }
 
