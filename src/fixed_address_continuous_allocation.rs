@@ -34,6 +34,15 @@ impl<const BLOCK_SIZE: usize> FaVecIndex<BLOCK_SIZE> {
 	}
 }
 
+//TODO: if FaVec became thread-safe, we could remove the need to wrap it in a mutex.
+//TODO: realizing gains from this requires being more clever about how we approach this structure
+//TODO: for data_blocks, we could potentially use Mutex<Vec<Arc<Mutex<DataBlock<T, BLOCK_SIZE>>>>>.  this might seem like more locks, but it'd allow us to keep "global" locks for shorter periods of time
+//TODO: we could also potentially make data_blocks lock-free with careful use of atomic operations
+//TODO: making free_space_map thread-safe may be more tricky.  a dummy mutex wrap may be good enough to start.  there may be some lock-free approaches as well, but these would need to preserve the ordering gurantees that btree provides
+//TODO: there do appear to be some existing lock-free btree structures, may be worth investigation
+//TODO: another big challenge for this is that the book keeping becomes a lot more complex if lock-free structures are used, as it's harder to guarantee that free_space_map remains accurate as data blocks are updated
+//TODO: a solution here is to simply assert that remove will only be called "safely", and never when a ref obtained via get is still around.  Because this struct is not used externally, we can assert this is correct due to the atomic behavior already present in DataHolder, which only self-removes when the ref count drops to zero, allowing us to correctly use unsafe rust
+//---
 //TODO: once mutex working, remove mutex on data_blocks and introduce thread-safe resizing array.  this array should have push/pop/get, no remove, only needs to grow capacity and never has to shrink
 //TODO: see AtomicPtr
 pub(crate) struct FaVec<T, const BLOCK_SIZE: usize> {
