@@ -79,7 +79,7 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 			refs_lock.insert(
 				key,
 				DataReference {
-					ptr: NonNull::new(inserted_item as *mut DataHolder<U>).unwrap(),
+					ptr: NonNull::new(inserted_item).unwrap(),
 					phantom: PhantomData,
 				},
 			)

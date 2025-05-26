@@ -2,7 +2,7 @@ use std::{any::TypeId, marker::PhantomData, ptr::NonNull};
 
 use crate::{data_holder::DataHolder, DataReference};
 
-/// A Genericized version of [DataReference]\<T\>
+/// A Generalized version of [DataReference]\<T\>
 ///
 /// This type can be safely passed around without knowing the inner `T` of a [DataReference].  [DataReferenceGeneric] will track ref count just as [DataReference], however the inner data `T` cannot be accessed without first converting back into [DataReference]\<T\>.
 ///

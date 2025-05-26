@@ -498,7 +498,7 @@ mod tests {
 		assert_eq!(*actually_b.lock().unwrap(), B_VALUE);
 	}
 
-	fn do_test_for_itertion_while_removing<F>(count_with_ordered_values: F)
+	fn do_test_for_iteration_while_removing<F>(count_with_ordered_values: F)
 	where
 		F: FnOnce(Arc<MbarcMap<i64, i64>>) -> i64 + Send,
 	{
@@ -549,7 +549,7 @@ mod tests {
 
 	#[test]
 	fn test_ensure_ordered_iterator_doesnt_use_already_freed_values() {
-		do_test_for_itertion_while_removing(|concurrent_hash| {
+		do_test_for_iteration_while_removing(|concurrent_hash| {
 			let mut counter = 0i64;
 			for a in concurrent_hash.iter_copied_values_ordered() {
 				counter += *a.lock().unwrap();
