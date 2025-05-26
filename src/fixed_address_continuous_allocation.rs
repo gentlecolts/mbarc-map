@@ -208,7 +208,7 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 
 	//TODO: rename to insert?
 	pub fn push(&self, val: T) -> FaVecIndex<BLOCK_SIZE> {
-		let mut data_block_lock = self.data_blocks.lock().unwrap();
+		let mut data_blocks_lock = self.data_blocks.lock().unwrap();
 		let mut free_space_lock = self.free_space_map.lock().unwrap();
 
 		let (push_block_index, free_space_in_block) =
@@ -219,14 +219,14 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 			free_space_in_block - 1,
 		);
 
-		let current_data_block_count = data_block_lock.len();
+		let current_data_block_count = data_blocks_lock.len();
 		assert!(push_block_index <= current_data_block_count);
 
 		if push_block_index == current_data_block_count {
-			data_block_lock.push(Box::new(DataBlock::new()));
+			data_blocks_lock.push(Box::new(DataBlock::new()));
 		}
 
-		let new_block = data_block_lock.get_mut(push_block_index).unwrap();
+		let new_block = data_blocks_lock.get_mut(push_block_index).unwrap();
 		assert_eq!(free_space_in_block, new_block.free_space);
 
 		let index = new_block.insert(val);
@@ -236,28 +236,28 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 	pub(crate) unsafe fn get_raw(&self, index: &FaVecIndex<BLOCK_SIZE>) -> Option<*mut T> {
 		let (block_index, offset) = FaVecIndex::index_to_block_offset(index);
 
-		let mut data_block_lock = self.data_blocks.lock().unwrap();
+		let mut data_blocks_lock = self.data_blocks.lock().unwrap();
 
-		if block_index >= data_block_lock.len() || offset >= BLOCK_SIZE {
+		if block_index >= data_blocks_lock.len() || offset >= BLOCK_SIZE {
 			return None;
 		}
 
-		match data_block_lock.get_mut(block_index) {
+		match data_blocks_lock.get_mut(block_index) {
 			Some(block) => block.data[offset].as_mut().map(|val| val as *mut T),
 			None => None,
 		}
 	}
 
 	pub fn remove(&self, index: &FaVecIndex<BLOCK_SIZE>) -> Option<T> {
-		let mut data_block_lock = self.data_blocks.lock().unwrap();
+		let mut data_blocks_lock = self.data_blocks.lock().unwrap();
 		let mut free_space_lock = self.free_space_map.lock().unwrap();
 
 		let (block_index, offset) = index.index_to_block_offset();
 
-		assert!(block_index < data_block_lock.len());
+		assert!(block_index < data_blocks_lock.len());
 		assert!(offset < BLOCK_SIZE);
 
-		let removed_item = match data_block_lock.get_mut(block_index) {
+		let removed_item = match data_blocks_lock.get_mut(block_index) {
 			Some(block) => {
 				let old_free_space = block.free_space;
 				let removed = block.remove(offset);
@@ -454,7 +454,7 @@ mod tests {
 	}
 
 	fn validate_vec_properties(vec: &FaVec<i64, TEST_BLOCK_SIZE>) {
-		let data_block_lock = vec.data_blocks.lock().unwrap();
+		let data_blocks_lock = vec.data_blocks.lock().unwrap();
 		let free_space_lock = vec.free_space_map.lock().unwrap();
 
 		//assert that actual data matches free_space
@@ -463,7 +463,7 @@ mod tests {
 		//statistically, full blocks should be mostly low-index blocks
 
 		let mut free_space_buckets = BTreeMap::new();
-		for (block_index, block) in data_block_lock.iter().enumerate() {
+		for (block_index, block) in data_blocks_lock.iter().enumerate() {
 			let total_free_blocks = block
 				.data
 				.iter()
