@@ -78,7 +78,7 @@ impl<T> DataReference<T> {
 		self.raw_data().increment_refcount();
 	}
 
-	pub(crate) fn drop_impl(raw_ptr: NonNull<u8>) {
+	pub(crate) fn drop_impl(raw_ptr: NonNull<()>) {
 		let inner = unsafe { raw_ptr.cast::<DataHolder<T>>().as_ref() };
 
 		if inner.ref_count.fetch_sub(1, Ordering::Release) != 1 {
@@ -87,7 +87,7 @@ impl<T> DataReference<T> {
 
 		atomic::fence(Ordering::Acquire);
 
-		inner.owner.lock().unwrap().remove(&inner.owning_key);
+		inner.owner.remove(&inner.owning_key);
 	}
 }
 
@@ -115,6 +115,6 @@ impl<T> Clone for DataReference<T> {
 
 impl<T> Drop for DataReference<T> {
 	fn drop(&mut self) {
-		DataReference::<T>::drop_impl(self.ptr.cast::<u8>());
+		DataReference::<T>::drop_impl(self.ptr.cast::<()>());
 	}
 }

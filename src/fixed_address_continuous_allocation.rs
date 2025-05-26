@@ -1,5 +1,8 @@
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Mutex;
+
+//TODO: most asserts in this should probably be converted to debug_assert
 
 struct DataBlock<T, const BLOCK_SIZE: usize> {
 	free_space: usize,
@@ -21,6 +24,7 @@ impl<T, const BLOCK_SIZE: usize> DataBlock<T, BLOCK_SIZE> {
 
 		//the above assert means this MUST find a value, assuming free_space is accurate
 		let mut stored_offset = 0;
+		let last_index = self.data.len() - 1;
 		//TODO: improve this loop further.  maybe iters like find?
 		for (i, item) in self.data.iter_mut().enumerate() {
 			if item.is_none() {
@@ -28,11 +32,36 @@ impl<T, const BLOCK_SIZE: usize> DataBlock<T, BLOCK_SIZE> {
 				stored_offset = i;
 				break;
 			}
-			//TODO: if we get here and i is last element, we should maybe panic with std::unreachable
+			if i == last_index {
+				std::unreachable!();
+			}
 		}
 		self.free_space -= 1;
 
 		stored_offset
+	}
+
+	fn remove(&mut self, index: usize) -> Option<T> {
+		let removed = self.data.get_mut(index).unwrap().take();
+
+		if removed.is_some() {
+			//let _old_free_space = self.free_space; //for debugging
+
+			//let new_free_space = self.free_space + 1;
+
+			//self.update_block_free_spaces(block_index, new_free_space);
+
+			self.free_space += 1;
+
+			//assert!(free_space_lock.contains_key(&new_free_space));
+			//assert!(!free_space_lock[&new_free_space].is_empty());
+
+			//TODO: while this should keep the map more compact, it also may cause more allocation/deallocation, which can have a cost
+			//testing seems to indicate within-margin runtime, but keep a close eye on this one
+			//self.prune_end_blocks();
+		}
+
+		removed
 	}
 }
 
@@ -66,14 +95,122 @@ impl<const BLOCK_SIZE: usize> FaVecIndex<BLOCK_SIZE> {
 	}
 }
 
+#[derive(Default)]
+struct FreeSpaceMap<const BLOCK_SIZE: usize> {
+	//maps remaining free blocks to the (set of) indices of corresponding data blocks
+	map: BTreeMap<usize, BTreeSet<usize>>,
+	tracked_block_count: usize,
+}
+
+impl<const BLOCK_SIZE: usize> FreeSpaceMap<BLOCK_SIZE> {
+	/// Identifies the best-available data block for inserting a new element, updates the size of that element in this map
+	/// if there are no free blocks, this will store current_data_block_count in the map and return it, indicating the need for a new block
+	/// returns (index of data block, current free space of block)
+	fn get_most_suitable_block_index_for_push(&mut self) -> (usize, usize) {
+		//the current strategy here is to first, find the block(s) with the least amount of non-zero free space remaining
+		//we want to concentrate data to "hot" blocks, where there's already lots of other data, so we have fewer gaps
+		//from these blocks, we then select the lowest-index block, so that high index blocks are more likely to empty, and thus be dropped later during remove()
+
+		let lowest_free_space = self.map.keys().find(|key| **key > 0);
+
+		//if no blocks with more than 0 free space, need to make a new block
+		let lowest_free_space = match lowest_free_space {
+			Some(lowest_free_space) => {
+				//println!("lowest has {} free blocks", lowest_free_space);
+				*lowest_free_space
+			}
+			None => {
+				//if data_block_lock.len() == Self::MAX_BLOCK_COUNT {
+				//TODO: technically we can avoid this
+				//consider instead using a struct that wraps the block index + block number, rather than packing them together at the end
+				//this, however, comes at a cost of having a more complex type for hashing purposes
+				//	std::process::abort(); //TODO: is abort the right exit here?
+				//}
+
+				//add new data block
+				let new_index = self.tracked_block_count;
+				//data_block_lock.push(Box::new(DataBlock::new()));
+
+				//track the new block's free space in our map
+				let new_set = BTreeSet::from([new_index]);
+				self.map.insert(BLOCK_SIZE, new_set);
+				self.tracked_block_count += 1;
+
+				//we now have a block that's completely empty
+				BLOCK_SIZE
+			}
+		};
+
+		//pick the lowest-indexed block (with the least free space)
+		//println!("{:?}", self.free_space_map);
+		let possible_blocks = self.map.get_mut(&lowest_free_space).unwrap();
+		assert!(!possible_blocks.is_empty());
+		let block_index = possible_blocks.first().unwrap();
+
+		//if no more blocks have lowest_free_space left, then remove the index
+		//if possible_blocks.is_empty() {
+		//	self.map.remove(&lowest_free_space);
+		//}
+
+		//println!("{:?}", self.free_space_map);
+		assert!(block_index < &self.tracked_block_count);
+		(*block_index, lowest_free_space)
+	}
+
+	fn update_block_free_space(
+		&mut self,
+		block_index: usize,
+		old_free_space: usize,
+		new_free_space: usize,
+	) {
+		let possible_blocks = self.map.get_mut(&old_free_space).unwrap();
+		assert!(!possible_blocks.is_empty());
+		possible_blocks.remove(&block_index);
+
+		//if no more blocks have lowest_free_space left, then remove the index
+		if possible_blocks.is_empty() {
+			self.map.remove(&old_free_space);
+		}
+
+		match self.map.entry(new_free_space) {
+			Entry::Vacant(entry) => {
+				entry.insert(BTreeSet::from_iter([block_index]));
+			}
+			Entry::Occupied(entry) => {
+				entry.into_mut().insert(block_index);
+			}
+		}
+	}
+
+	/// Remove the highest index item from this map
+	/// this should correspond to the last data block, which should only be popped when empty
+	/// therefore, we can assert that we only pop from the set of items with BLOCK_SIZE free space
+	//TODO: to safely become lock-free, we may simply never remove allocated blocks, at which point this can be removed
+	fn pop(&mut self) -> usize {
+		let end_block_index = self.tracked_block_count - 1;
+
+		assert!(self.map.contains_key(&BLOCK_SIZE));
+		let free_indices = self.map.get_mut(&BLOCK_SIZE).unwrap();
+
+		assert!(free_indices.contains(&end_block_index));
+		free_indices.remove(&end_block_index);
+
+		end_block_index
+	}
+}
+
+//TODO: complete rewrite for mutex version
+//TODO: introduce struct wrapping free_space_map to encapsulate actions and ensure thread-safe order of operations
+//TODO: once mutex working, remove mutex on data_blocks and introduce thread-safe resizing array.  this array should have push/pop/get, no remove, only needs to grow capacity and never has to shrink
+//TODO: see AtomicPtr
 pub(crate) struct FaVec<T, const BLOCK_SIZE: usize> {
 	//TODO: we use Box to keep data_blocks small and allow efficient resize, however we also only add to/remove from data_blocks at the end index.
 	//TODO: Determine if it's most efficient to a) keep as-is, b) remove the Box, or c) remove empty blocks from the middle as well, rather than just the end
 	//TODO: keep in mind that, if Box is removed here, we still must ensure that individual elements are pointer safe, ie never moved in memory
-	data_blocks: Vec<Box<DataBlock<T, BLOCK_SIZE>>>,
+	data_blocks: Mutex<Vec<Box<DataBlock<T, BLOCK_SIZE>>>>,
 
 	//maps free space to a set of indexes (in data)
-	free_space_map: BTreeMap<usize, BTreeSet<usize>>,
+	free_space_map: Mutex<FreeSpaceMap<BLOCK_SIZE>>,
 }
 
 impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
@@ -92,36 +229,39 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 		initial_map.insert(BLOCK_SIZE, initial_set);
 
 		Self {
-			data_blocks: vec![Box::new(DataBlock::new())],
-			free_space_map: initial_map,
+			data_blocks: Mutex::new(vec![Box::new(DataBlock::new())]),
+			free_space_map: Default::default(),
 		}
 	}
 
-	fn update_block_free_spaces(&mut self, block_index: usize, new_free_space: usize) {
-		assert!(block_index < self.data_blocks.len());
+	/*
+	fn update_block_free_spaces(&self, block_index: usize, new_free_space: usize) {
+		let mut data_block_lock = self.data_blocks.lock().unwrap();
+		let mut free_space_lock =self.free_space_map.lock().unwrap();
+
+		assert!(block_index < data_block_lock.len());
 		assert!(new_free_space <= BLOCK_SIZE);
 
 		//println!("updating block {} free space to {}", block_index, new_free_space);
 
-		assert!(block_index < self.data_blocks.len());
-		let block = self.data_blocks[block_index].as_mut();
+		assert!(block_index < data_block_lock.len());
+		let block = data_block_lock[block_index].as_mut();
 		let old_free_space = block.free_space;
 
 		//println!("block {} previously had {} free indices", block_index, old_free_space);
-
-		assert!(self.free_space_map.contains_key(&old_free_space));
-		let old_free_blocks = self.free_space_map.get_mut(&old_free_space).unwrap();
+		assert!(free_space_lock.contains_key(&old_free_space));
+		let old_free_blocks = free_space_lock.get_mut(&old_free_space).unwrap();
 		assert!(!old_free_blocks.is_empty());
 		assert!(old_free_blocks.contains(&block_index));
 		old_free_blocks.remove(&block_index);
 
 		if old_free_blocks.is_empty() {
-			self.free_space_map.remove(&old_free_space);
+			free_space_lock.remove(&old_free_space);
 
 			//println!("block {} was the last block with {} free indices, removing", block_index, old_free_space);
 		}
 
-		match self.free_space_map.entry(new_free_space) {
+		match free_space_lock.entry(new_free_space) {
 			Entry::Occupied(mut entry) => {
 				entry.get_mut().insert(block_index);
 
@@ -138,163 +278,100 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 
 		block.free_space = new_free_space;
 	}
-
-	fn get_or_create_block_for_insert(&mut self) -> usize {
-		//the current strategy here is to first, find the block(s) with the least amount of non-zero free space remaining
-		//we want to concentrate data to "hot" blocks, where there's already lots of other data, so we have fewer gaps
-		//from these blocks, we then select the lowest-index block, so that high index blocks are more likely to empty, and thus be dropped later during remove()
-
-		let lowest_free_space = self.free_space_map.keys().find(|key| **key > 0);
-
-		//if no blocks with more than 0 free space, need to make a new block
-		let lowest_free_space = match lowest_free_space {
-			Some(lowest_free_space) => {
-				//println!("lowest has {} free blocks", lowest_free_space);
-				*lowest_free_space
-			}
-			None => {
-				if self.data_blocks.len() == Self::MAX_BLOCK_COUNT {
-					//TODO: technically we can avoid this
-					//consider instead using a struct that wraps the block index + block number, rather than packing them together at the end
-					//this, however, comes at a cost of having a more complex type for hashing purposes
-					std::process::abort(); //TODO: is abort the right exit here?
-				}
-
-				//add new data block
-				let new_index = self.data_blocks.len();
-				self.data_blocks.push(Box::new(DataBlock::new()));
-
-				//track the new block's free space in our map
-				let mut new_set = BTreeSet::new();
-				new_set.insert(new_index);
-				self.free_space_map.insert(BLOCK_SIZE, new_set);
-
-				//we now have a block that's completely empty
-				BLOCK_SIZE
-			}
-		};
-
-		//pick the lowest-indexed block (with the least free space)
-		//println!("{:?}", self.free_space_map);
-		let possible_blocks = self.free_space_map.get_mut(&lowest_free_space).unwrap();
-		assert!(!possible_blocks.is_empty());
-		let block_index = possible_blocks.pop_first().unwrap();
-
-		//if no more blocks have lowest_free_space left, then remove the index
-		if possible_blocks.is_empty() {
-			self.free_space_map.remove(&lowest_free_space);
-		}
-
-		//println!("{:?}", self.free_space_map);
-		assert!(block_index < self.data_blocks.len());
-		block_index
-	}
+	*/
 
 	//TODO: insert?
-	pub fn push(&mut self, val: T) -> FaVecIndex<BLOCK_SIZE> {
-		let block_index = self.get_or_create_block_for_insert();
+	pub fn push(&self, val: T) -> FaVecIndex<BLOCK_SIZE> {
+		let mut data_block_lock = self.data_blocks.lock().unwrap();
+		let mut free_space_lock = self.free_space_map.lock().unwrap();
 
-		//find an index in our block to insert the new data
-		let data_block = self.data_blocks.get_mut(block_index).unwrap();
-		let stored_offset = data_block.insert(val);
+		let (push_block_index, free_space_in_block) =
+			free_space_lock.get_most_suitable_block_index_for_push();
+		free_space_lock.update_block_free_space(
+			push_block_index,
+			free_space_in_block,
+			free_space_in_block - 1,
+		);
 
-		//store the block's index back in its proper place in the free space map
-		match self.free_space_map.get_mut(&data_block.free_space) {
-			Some(block_indexes) => {
-				block_indexes.insert(block_index);
-			}
-			None => {
-				let mut new_indexes = BTreeSet::new();
-				new_indexes.insert(block_index);
+		let current_data_block_count = data_block_lock.len();
+		assert!(push_block_index <= current_data_block_count);
 
-				self.free_space_map
-					.insert(data_block.free_space, new_indexes);
-			}
+		if push_block_index == current_data_block_count {
+			data_block_lock.push(Box::new(DataBlock::new()));
 		}
 
-		//println!("added item, free space map is now: {:?}", self.free_space_map);
+		let new_block = data_block_lock.get_mut(push_block_index).unwrap();
+		assert_eq!(free_space_in_block, new_block.free_space);
 
-		FaVecIndex::index_from_block_offset(block_index, stored_offset)
+		let index = new_block.insert(val);
+		FaVecIndex::index_from_block_offset(push_block_index, index)
 	}
 
-	pub fn get(&self, index: &FaVecIndex<BLOCK_SIZE>) -> Option<&T> {
+	pub(crate) unsafe fn get_raw(&self, index: &FaVecIndex<BLOCK_SIZE>) -> Option<*mut T> {
 		let (block_index, offset) = FaVecIndex::index_to_block_offset(index);
-		//let (block_index, offset) = (index.block_index,index.offset);
 
-		if block_index >= self.data_blocks.len() || offset >= BLOCK_SIZE {
+		let mut data_block_lock = self.data_blocks.lock().unwrap();
+
+		if block_index >= data_block_lock.len() || offset >= BLOCK_SIZE {
 			return None;
 		}
 
-		match self.data_blocks.get(block_index) {
-			Some(block) => block.data[offset].as_ref(),
+		match data_block_lock.get_mut(block_index) {
+			Some(block) => match block.data[offset].as_mut() {
+				None => None,
+				Some(val) => Some(val as *mut T),
+			},
 			None => None,
 		}
 	}
 
-	//todo: evaluate necessity of mut
-	pub fn get_mut(&mut self, index: &FaVecIndex<BLOCK_SIZE>) -> Option<&mut T> {
-		let (block_index, offset) = FaVecIndex::index_to_block_offset(index);
+	/*
+	fn prune_end_blocks(&self) {
+		let mut data_block_lock = self.data_blocks.lock().unwrap();
+		let mut free_space_lock =self.free_space_map.lock().unwrap();
 
-		if block_index >= self.data_blocks.len() || offset >= BLOCK_SIZE {
-			return None;
-		}
-
-		match self.data_blocks.get_mut(block_index) {
-			Some(block) => block.data[offset].as_mut(),
-			None => None,
-		}
-	}
-
-	fn prune_end_blocks(&mut self) {
-		if let Some(empty_blocks) = self.free_space_map.get_mut(&BLOCK_SIZE) {
+		if let Some(empty_blocks) = free_space_lock.get_mut(&BLOCK_SIZE) {
 			//keep at least one block allocation, but otherwise we can remove empty blocks from the end
-			while self.data_blocks.len() > 1
-				&& self.data_blocks.last().unwrap().free_space == BLOCK_SIZE
+			while data_block_lock.len() > 1
+				&& data_block_lock.last().unwrap().free_space == BLOCK_SIZE
 			{
-				self.data_blocks.pop();
+				data_block_lock.pop();
 
 				//new length is the index of the popped element
 				//equivalent to using len()-1 before the above pop as long as len>0, len cannot be zero due to loop conditions
-				let old_end_index = self.data_blocks.len();
+				let old_end_index = data_block_lock.len();
 
 				assert!(!empty_blocks.is_empty());
 				empty_blocks.remove(&old_end_index);
 			}
 
 			if empty_blocks.is_empty() {
-				self.free_space_map.remove(&BLOCK_SIZE);
+				free_space_lock.remove(&BLOCK_SIZE);
 			}
 		};
 	}
+	*/
 
-	//todo: evaluate necessity of mut
-	pub fn remove(&mut self, index: &FaVecIndex<BLOCK_SIZE>) -> Option<T> {
-		let (block_index, offset) = FaVecIndex::index_to_block_offset(index);
+	pub fn remove(&self, index: &FaVecIndex<BLOCK_SIZE>) -> Option<T> {
+		let mut data_block_lock = self.data_blocks.lock().unwrap();
+		let mut free_space_lock = self.free_space_map.lock().unwrap();
 
-		assert!(block_index < self.data_blocks.len());
+		let (block_index, offset) = FaVecIndex::index_to_block_offset(&index);
+
+		assert!(block_index < data_block_lock.len());
 		assert!(offset < BLOCK_SIZE);
 
-		if block_index >= self.data_blocks.len() || offset >= BLOCK_SIZE {
-			//TODO: consider panic instead
-			return None;
-		}
-
-		let removed_item = match self.data_blocks.get_mut(block_index) {
+		let removed_item = match data_block_lock.get_mut(block_index) {
 			Some(block) => {
-				let removed = block.data.get_mut(offset).unwrap().take();
+				let old_free_space = block.free_space;
+				let removed = block.remove(offset);
 
 				if removed.is_some() {
-					let _old_free_space = block.free_space; //for debugging
-
-					let new_free_space = block.free_space + 1;
-					self.update_block_free_spaces(block_index, new_free_space);
-
-					assert!(self.free_space_map.contains_key(&new_free_space));
-					assert!(!self.free_space_map[&new_free_space].is_empty());
-
-					//TODO: while this should keep the map more compact, it also may cause more allocation/deallocation, which can have a cost
-					//testing seems to indicate within-margin runtime, but keep a close eye on this one
-					self.prune_end_blocks();
+					free_space_lock.update_block_free_space(
+						block_index,
+						old_free_space,
+						old_free_space + 1,
+					);
 				}
 
 				removed
@@ -307,11 +384,14 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 	}
 
 	pub fn capacity(&self) -> usize {
-		self.data_blocks.len() * BLOCK_SIZE
+		self.data_blocks.lock().unwrap().len() * BLOCK_SIZE
 	}
 
 	pub fn len(&self) -> usize {
 		self.free_space_map
+			.lock()
+			.unwrap()
+			.map
 			.iter()
 			.fold(0, |acc, (free_space, items)| {
 				let used_space = BLOCK_SIZE - free_space;
@@ -319,58 +399,6 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 
 				acc + used_space * block_count
 			})
-	}
-
-	pub fn iter(&self) -> FaVecIter<T, BLOCK_SIZE> {
-		FaVecIter {
-			block_index: 0,
-			offset: 0,
-			real_count: 0,
-			fa_vec: self,
-		}
-	}
-}
-
-pub struct FaVecIter<'a, T, const BLOCK_SIZE: usize> {
-	block_index: usize,
-	offset: usize,
-	real_count: usize,
-
-	fa_vec: &'a FaVec<T, BLOCK_SIZE>,
-}
-
-impl<'a, T, const BLOCK_SIZE: usize> FaVecIter<'a, T, BLOCK_SIZE> {
-	fn increment(&mut self) {
-		self.offset += 1;
-		if self.offset >= BLOCK_SIZE {
-			self.offset = 0;
-			self.block_index += 1;
-		}
-	}
-}
-
-impl<'a, T, const BLOCK_SIZE: usize> Iterator for FaVecIter<'a, T, BLOCK_SIZE> {
-	type Item = &'a T;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		while self.block_index < self.fa_vec.data_blocks.len() {
-			let block_ref = self.fa_vec.data_blocks.get(self.block_index).unwrap();
-			let item = &block_ref.data[self.offset];
-
-			self.increment();
-
-			if item.is_some() {
-				self.real_count += 1;
-				return item.as_ref();
-			}
-		}
-		None
-	}
-
-	fn size_hint(&self) -> (usize, Option<usize>) {
-		//TODO: cache len?
-		let size = self.fa_vec.len() - self.real_count;
-		(size, Some(size))
 	}
 }
 
@@ -415,7 +443,7 @@ mod tests {
 		//println!("indices inserted: {:?}",keys);
 
 		assert_eq!(vec.len(), keys.len());
-		validate_vec_properties(&mut vec);
+		validate_vec_properties(&vec);
 	}
 
 	#[test]
@@ -458,7 +486,7 @@ mod tests {
 		//println!("indices inserted: {:?}",keys);
 
 		assert_eq!(vec.len(), keys.len());
-		validate_vec_properties(&mut vec);
+		validate_vec_properties(&vec);
 	}
 
 	#[test]
@@ -505,24 +533,7 @@ mod tests {
 		//println!("indices inserted: {:?}",keys);
 
 		assert_eq!(vec.len(), keys.len());
-		validate_vec_properties(&mut vec);
-	}
-
-	#[test]
-	fn iterator_basic() {
-		let mut vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
-
-		let _first = vec.push(5);
-		let _second = vec.push(7);
-		let _third = vec.push(2);
-
-		vec.remove(&_second);
-
-		let vals = vec.iter().copied().collect::<Vec<i64>>();
-
-		assert_eq!(vals, vec![5, 2]);
-		assert_eq!(vec.len(), 2);
-		validate_vec_properties(&mut vec);
+		validate_vec_properties(&vec);
 	}
 
 	#[test]
@@ -530,8 +541,8 @@ mod tests {
 		let mut vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
 
 		let mut last_block = FaVecIndex::from_absolute_index(0);
-		for i in 0..(TEST_BLOCK_SIZE + 1) {
-			last_block = vec.push(i as i64);
+		for i in 0..((TEST_BLOCK_SIZE + 1) as i64) {
+			last_block = vec.push(i);
 		}
 
 		//previously, pruning was not correctly occurring when the end block became empty and no other blocks were vacant
@@ -543,17 +554,20 @@ mod tests {
 		vec.push((TEST_BLOCK_SIZE + 1) as i64);
 
 		assert_eq!(vec.len(), TEST_BLOCK_SIZE + 1);
-		validate_vec_properties(&mut vec);
+		validate_vec_properties(&vec);
 	}
 
-	fn validate_vec_properties(vec: &mut FaVec<i64, TEST_BLOCK_SIZE>) {
+	fn validate_vec_properties(vec: &FaVec<i64, TEST_BLOCK_SIZE>) {
+		let data_block_lock = vec.data_blocks.lock().unwrap();
+		let free_space_lock = vec.free_space_map.lock().unwrap();
+
 		//assert that actual data matches free_space
 		//assert that free space map matches free_space
 		//statistically, most blocks should be pretty full, or pretty empty
 		//statistically, full blocks should be mostly low-index blocks
 
 		let mut free_space_buckets = BTreeMap::new();
-		for (block_index, block) in vec.data_blocks.iter().enumerate() {
+		for (block_index, block) in data_block_lock.iter().enumerate() {
 			let total_free_blocks = block
 				.data
 				.iter()
@@ -561,8 +575,8 @@ mod tests {
 				.count();
 			assert_eq!(total_free_blocks, block.free_space);
 
-			assert!(vec.free_space_map.contains_key(&block.free_space));
-			assert!(vec.free_space_map[&block.free_space].contains(&block_index));
+			assert!(free_space_lock.map.contains_key(&block.free_space));
+			assert!(free_space_lock.map[&block.free_space].contains(&block_index));
 
 			match free_space_buckets.get_mut(&block.free_space) {
 				Some(count) => {
@@ -585,7 +599,7 @@ mod tests {
 		let most_free_block_count = *free_space_counts.last().unwrap();
 		let middle_free_block_count = free_space_counts[free_space_counts.len() / 2];
 
-		println!("free space map: {:?}", vec.free_space_map);
+		println!("free space map: {:?}", free_space_lock.map);
 		println!("free count vec: {:?}", free_space_counts);
 		println!(
 			"least/middle/most free: {} - {} - {}",

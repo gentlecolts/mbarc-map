@@ -50,7 +50,7 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 	/// ```
 	pub fn new() -> Self {
 		Self {
-			data: Arc::new(Mutex::new(FaVec::new())),
+			data: Arc::new(FaVec::new()),
 			data_refs: Arc::new(Mutex::new(HashType::new())),
 		}
 	}
@@ -61,7 +61,6 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 	/// Currently, this is std::collections::HashMap
 	pub fn insert(&self, key: T, value: U) -> Option<DataReference<U>> {
 		let mut refs_lock = self.data_refs.lock().unwrap();
-		let mut data_lock = self.data.lock().unwrap();
 
 		let new_holder = DataHolder {
 			ref_count: AtomicUsize::new(1),
@@ -71,17 +70,20 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 			owning_key: FaVecIndex::from_absolute_index(0),
 		};
 
-		let new_key = data_lock.push(new_holder);
-		let inserted_item = data_lock.get_mut(&new_key).unwrap();
-		inserted_item.owning_key = new_key;
+		let new_key = self.data.push(new_holder);
 
-		refs_lock.insert(
-			key,
-			DataReference {
-				ptr: NonNull::new(inserted_item as *mut DataHolder<U>).unwrap(),
-				phantom: PhantomData,
-			},
-		)
+		unsafe {
+			let inserted_item = self.data.get_raw(&new_key).unwrap();
+			(*inserted_item).owning_key = new_key;
+
+			refs_lock.insert(
+				key,
+				DataReference {
+					ptr: NonNull::new(inserted_item as *mut DataHolder<U>).unwrap(),
+					phantom: PhantomData,
+				},
+			)
+		}
 	}
 
 	/// Returns `true` if the map contains a value for the specified key.

@@ -8,10 +8,10 @@ use crate::{data_holder::DataHolder, DataReference};
 ///
 /// Implements [From<DataReference<`T`>>]
 pub struct DataReferenceGeneric {
-	ptr: NonNull<u8>,
+	ptr: NonNull<()>,
 	type_id: TypeId,
 	inner_type_id: TypeId,
-	drop_fn: &'static dyn Fn(NonNull<u8>),
+	drop_fn: &'static dyn Fn(NonNull<()>),
 }
 
 impl DataReferenceGeneric {
@@ -51,7 +51,7 @@ impl<T: 'static> From<DataReference<T>> for DataReferenceGeneric {
 		source.increment_refcount();
 
 		Self {
-			ptr: source.ptr.cast::<u8>(),
+			ptr: source.ptr.cast::<()>(),
 			type_id: TypeId::of::<DataReference<T>>(),
 			inner_type_id: TypeId::of::<T>(),
 			drop_fn: &DataReference::<T>::drop_impl,
@@ -61,6 +61,6 @@ impl<T: 'static> From<DataReference<T>> for DataReferenceGeneric {
 
 impl Drop for DataReferenceGeneric {
 	fn drop(&mut self) {
-		(self.drop_fn)(self.ptr.cast::<u8>());
+		(self.drop_fn)(self.ptr.cast::<()>());
 	}
 }

@@ -15,7 +15,7 @@ use crate::fixed_address_continuous_allocation::{FaVec, FaVecIndex};
 pub(crate) const DATA_HOLDER_BLOCK_SIZE_INTERNAL: usize = 32;
 
 pub(crate) type SharedDataContainerType<T> =
-	Arc<Mutex<FaVec<DataHolder<T>, DATA_HOLDER_BLOCK_SIZE_INTERNAL>>>;
+	Arc<FaVec<DataHolder<T>, DATA_HOLDER_BLOCK_SIZE_INTERNAL>>;
 
 pub(crate) struct DataHolder<T> {
 	pub(crate) ref_count: AtomicUsize,
@@ -24,7 +24,7 @@ pub(crate) struct DataHolder<T> {
 	//TODO: having these here rather than in DataReference means less duplication, but also makes for fatter entries in the FaVec array
 	//the deduplication is probably worth it, but will need to bench for it being worth the potentially less good caching behavior
 	pub(crate) owner: SharedDataContainerType<T>,
-	pub(crate) owning_key: FaVecIndex<32>,
+	pub(crate) owning_key: FaVecIndex<DATA_HOLDER_BLOCK_SIZE_INTERNAL>,
 
 	pub data: Mutex<T>,
 }
