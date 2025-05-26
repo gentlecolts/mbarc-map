@@ -243,10 +243,7 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 		}
 
 		match data_block_lock.get_mut(block_index) {
-			Some(block) => match block.data[offset].as_mut() {
-				None => None,
-				Some(val) => Some(val as *mut T),
-			},
+			Some(block) => block.data[offset].as_mut().map(|val| val as *mut T),
 			None => None,
 		}
 	}
@@ -255,7 +252,7 @@ impl<T, const BLOCK_SIZE: usize> FaVec<T, BLOCK_SIZE> {
 		let mut data_block_lock = self.data_blocks.lock().unwrap();
 		let mut free_space_lock = self.free_space_map.lock().unwrap();
 
-		let (block_index, offset) = FaVecIndex::index_to_block_offset(&index);
+		let (block_index, offset) = index.index_to_block_offset();
 
 		assert!(block_index < data_block_lock.len());
 		assert!(offset < BLOCK_SIZE);
@@ -319,7 +316,7 @@ mod tests {
 		const ITEM_COUNT: usize = 100000;
 
 		let mut rng = ChaCha8Rng::seed_from_u64(0xDEADBEEF);
-		let mut vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
+		let vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
 		let mut keys = Vec::<FaVecIndex<TEST_BLOCK_SIZE>>::new();
 
 		//note, this access pattern is pretty basic, as it is very unlikely to leave holes in the vec
@@ -350,7 +347,7 @@ mod tests {
 		const ITEM_COUNT: usize = 100000;
 
 		let mut rng = ChaCha8Rng::seed_from_u64(0xDEADBEEF);
-		let mut vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
+		let vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
 		let mut keys = Vec::<FaVecIndex<TEST_BLOCK_SIZE>>::new();
 
 		const INITIAL_ITEM_COUNT: usize = ITEM_COUNT * 2;
@@ -393,7 +390,7 @@ mod tests {
 		const ITEM_COUNT: usize = 100000;
 
 		let mut rng = ChaCha8Rng::seed_from_u64(0xDEADBEEF);
-		let mut vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
+		let vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
 		let mut keys = Vec::<FaVecIndex<TEST_BLOCK_SIZE>>::new();
 
 		for _ in 0..2 * ITEM_COUNT {
@@ -437,7 +434,7 @@ mod tests {
 
 	#[test]
 	fn ensure_correct_prune_on_block_edge() {
-		let mut vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
+		let vec = FaVec::<i64, TEST_BLOCK_SIZE>::new();
 
 		let mut last_block = FaVecIndex::from_absolute_index(0);
 		for i in 0..((TEST_BLOCK_SIZE + 1) as i64) {
