@@ -1,11 +1,12 @@
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Default)]
 pub(crate) struct FreeSpaceMap<const BLOCK_SIZE: usize> {
 	//maps remaining free blocks to the (set of) indices of corresponding data blocks
 	//TODO: would be nice if we could make map private
 	pub(crate) map: BTreeMap<usize, BTreeSet<usize>>,
+	index_to_free_space: HashMap<usize, usize>,
 	tracked_block_count: usize,
 }
 
@@ -34,6 +35,8 @@ impl<const BLOCK_SIZE: usize> FreeSpaceMap<BLOCK_SIZE> {
 				//track the new block's free space in our map
 				let new_set = BTreeSet::from([new_index]);
 				self.map.insert(BLOCK_SIZE, new_set);
+
+				self.index_to_free_space.insert(new_index, BLOCK_SIZE);
 
 				//we now have a block that's completely empty
 				BLOCK_SIZE
@@ -74,11 +77,15 @@ impl<const BLOCK_SIZE: usize> FreeSpaceMap<BLOCK_SIZE> {
 				entry.into_mut().insert(block_index);
 			}
 		}
+
+		assert!(self.index_to_free_space.contains_key(&block_index));
+		self.index_to_free_space.insert(block_index, new_free_space);
 	}
 
 	//TODO: this function becomes much more efficient if we also track [block index] => [free space]
 	//however, care needs to be taken to enable future attempts to make this struct lock-free
 	fn find_block_free_space(&self, block_index: usize) -> Option<usize> {
+		/*
 		for (free_space, blocks) in self.map.iter() {
 			if blocks.contains(&block_index) {
 				return Some(*free_space);
@@ -86,6 +93,8 @@ impl<const BLOCK_SIZE: usize> FreeSpaceMap<BLOCK_SIZE> {
 		}
 
 		None
+		// */
+		self.index_to_free_space.get(&block_index).cloned()
 	}
 
 	pub(crate) fn increment_block_free_space(&mut self, block_index: usize) {
