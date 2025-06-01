@@ -60,8 +60,6 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 	/// The return of this function is identical to the insert function of the underlying map type used internally to store references.
 	/// Currently, this is std::collections::HashMap
 	pub fn insert(&self, key: T, value: U) -> Option<DataReference<U>> {
-		let mut refs_lock = self.data_refs.lock().unwrap();
-
 		let new_holder = DataHolder {
 			ref_count: AtomicUsize::new(1),
 			pending_removal: AtomicBool::new(false),
@@ -76,7 +74,7 @@ impl<T: Hash + Eq, U> MbarcMap<T, U> {
 			let inserted_item = self.data.get_raw(&new_key).unwrap();
 			(*inserted_item).owning_key = new_key;
 
-			refs_lock.insert(
+			self.data_refs.lock().unwrap().insert(
 				key,
 				DataReference {
 					ptr: NonNull::new(inserted_item).unwrap(),
